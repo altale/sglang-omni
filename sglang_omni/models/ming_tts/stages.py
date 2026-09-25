@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import logging
 import math
+from functools import partial
 from numbers import Real
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -28,6 +29,7 @@ from sglang_omni.models.ming_tts.hf_config import (
 from sglang_omni.models.ming_tts.request_builders import preprocess_ming_tts_payload
 from sglang_omni.models.ming_tts.tokenizer import load_ming_tts_tokenizer
 from sglang_omni.models.ming_tts.weight_loading import load_ming_tts_audio_vae_weights
+from sglang_omni.proto import StagePayload
 from sglang_omni.scheduling.simple_scheduler import SimpleScheduler
 from sglang_omni.utils.checkpoint import resolve_checkpoint as _resolve_checkpoint
 from sglang_omni.utils.gpu_memory import (
@@ -99,6 +101,10 @@ def create_preprocessing_executor(
     max_decode_steps_cap: int | None = None,
     max_concurrency: int = 1,
 ) -> SimpleScheduler:
+    from sglang_omni.models.ming_tts.apple_runtime import ming_tts_uses_mlx
+    from sglang_omni.platforms import current_platform
+
+    nonstream_only = current_platform.is_mps() and not ming_tts_uses_mlx()
     checkpoint_dir = _resolve_checkpoint(model_path)
     config = load_ming_tts_config(checkpoint_dir)
     context_length = int(context_length or resolve_context_length(config))
@@ -107,7 +113,11 @@ def create_preprocessing_executor(
         llm_config=config.llm_config,
     )
 
-    def _preprocess(payload):
+    def _preprocess(payload: StagePayload) -> StagePayload:
+        if nonstream_only and (payload.request.params or {}).get("stream", False):
+            raise ValueError(
+                "Ming Torch/MPS currently supports non-streaming requests only"
+            )
         return preprocess_ming_tts_payload(
             payload,
             tokenizer=tokenizer,
@@ -133,9 +143,11 @@ def create_sglang_tts_engine_executor(
 ) -> Any:
     from sglang_omni.models.ming_tts.apple_runtime import (
         MingTtsMlxEngineBuilder,
+        MingTtsTorchMpsEngineBuilder,
         ming_tts_uses_mlx,
     )
     from sglang_omni.models.ming_tts.engine_builder import MingTtsEngineBuilder
+    from sglang_omni.platforms import current_platform
 
     user_overrides = dict(server_args_overrides or {})
     if "tp_size" in user_overrides and int(user_overrides["tp_size"]) != int(tp_size):
@@ -145,7 +157,12 @@ def create_sglang_tts_engine_executor(
         )
     context_length = int(user_overrides.pop("context_length", context_length or 0) or 0)
 
-    builder_class = MingTtsMlxEngineBuilder if ming_tts_uses_mlx() else MingTtsEngineBuilder
+    if ming_tts_uses_mlx():
+        builder_class = MingTtsMlxEngineBuilder
+    elif current_platform.is_mps():
+        builder_class = MingTtsTorchMpsEngineBuilder
+    else:
+        builder_class = MingTtsEngineBuilder
     return builder_class(
         context_length=context_length or None,
         total_gpu_memory_fraction=total_gpu_memory_fraction,
@@ -323,6 +340,34 @@ def create_audio_decode_executor(
     from sglang_omni.utils.device import resolve_concrete_device
 
     resolved_device = resolve_concrete_device(device, gpu_id)
+    if resolved_device.type == "mps":
+        from sglang_omni.models.ming_tts.audio_decode import (
+            MingTorchAudioDecoder,
+            decode_ming_tts_audio_payload,
+        )
+
+        if streaming_cuda_graph or stream_slots != 1:
+            raise ValueError(
+                "Ming Torch/MPS audio decode requires streaming_cuda_graph=false "
+                "and stream_slots=1"
+            )
+        checkpoint_dir = _resolve_checkpoint(model_path)
+        config = load_ming_tts_config(checkpoint_dir)
+        audio_config = resolve_ming_tts_audio_vae_config(
+            config.audio_tokenizer_config,
+            attn_implementation=MING_TTS_AUDIO_VAE_ATTN_IMPLEMENTATION,
+        )
+        audio_vae = load_ming_tts_audio_vae(
+            checkpoint_dir, audio_config, device=resolved_device, dtype=dtype
+        )
+        return SimpleScheduler(
+            partial(
+                decode_ming_tts_audio_payload,
+                decoder=MingTorchAudioDecoder(audio_vae),
+                keep_latents=keep_latents,
+            ),
+            max_concurrency=1,
+        )
     if resolved_device.type != "cuda" or not torch.cuda.is_available():
         raise ValueError(
             "Ming-Omni-TTS fixed AudioVAE serving requires an available CUDA device"

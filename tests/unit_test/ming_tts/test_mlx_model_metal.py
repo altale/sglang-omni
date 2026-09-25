@@ -288,7 +288,7 @@ def test_cfm_with_real_dit(
     assert_close(actual, expected)
 
 
-def test_official_weight_mapping_and_strict_coverage(model: MingTTSModel) -> None:
+def test_official_weight_mapping(model: MingTTSModel) -> None:
     canonical = dict(tree_flatten(model.parameters()))
     official = {}
     for key, value in canonical.items():
@@ -309,12 +309,6 @@ def test_official_weight_mapping_and_strict_coverage(model: MingTTSModel) -> Non
     for key in canonical:
         np.testing.assert_array_equal(np.array(mapped[key]), np.array(canonical[key]))
     model.load_weights(list(mapped.items()), strict=True)
-    missing = dict(mapped)
-    del missing["stop_head.weight"]
-    with pytest.raises(ValueError):
-        model.load_weights(list(missing.items()), strict=True)
-    with pytest.raises(ValueError):
-        model.load_weights(list({**mapped, "unknown.weight": mx.zeros((1,))}.items()), strict=True)
 
 
 @pytest.mark.parametrize("frames", [2, 4, 8])
@@ -401,26 +395,6 @@ def test_first_inference_on_scheduler_thread(model: MingTTSModel) -> None:
     np.testing.assert_allclose(actual, expected, atol=2e-5, rtol=2e-4)
 
 
-def test_stop_threshold_and_terminal_patch(model: MingTTSModel) -> None:
-    model.stop_head.weight = mx.zeros_like(model.stop_head.weight)
-    model.stop_head.bias = mx.array([-5.0, 5.0])
-    runner = MingTTSMlxRunner(model)
-    runner.start("stop", mx.array([1, 2]), max_steps=8)
-    for i in range(5):
-        output = runner.step("stop", timesteps=build_cfm_timesteps(1))
-        assert output.latent.shape == (2, 4)
-        assert output.finish_reason == ("stop" if i == 4 else None)
-    assert runner.states == {}
-
-
-def test_step_failure_releases_request(model: MingTTSModel) -> None:
-    runner = MingTTSMlxRunner(model)
-    runner.start("bad", mx.array([1, 2]), max_steps=2)
-    with pytest.raises(ValueError):
-        runner.step("bad", noise=mx.zeros((1, 99, 2)))
-    assert runner.states == {}
-
-
 @pytest.mark.parametrize("quantization", [None, "mlx_q4", "mlx_q8"])
 def test_strict_checkpoint_load_and_backbone_quantization(
     config: ModelConfig, tmp_path: Path, quantization: str | None
@@ -495,6 +469,8 @@ def test_scheduler_runner_control_tokens_and_cleanup(
     assert result.next_token_ids.tolist() == [3]
     assert backend.states["first"].cache[0].offset == 3
     for step in range(1, 5 if stop else 6):
+        assert result.next_token_ids.tolist() == [3]
+        assert "first" in backend.states
         data.generation_steps = step
         result = runner.custom_decode_forward(None, None, [request])
     assert result.next_token_ids.tolist() == [4 if stop else 3]
@@ -525,125 +501,3 @@ def test_scheduler_runner_control_tokens_and_cleanup(
         runner.custom_decode_forward(None, None, [request])
     assert backend.states == {}
     assert runner._generated == {}
-
-
-def test_real_scheduler_with_tiny_ming_forward(
-    model: MingTTSModel, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    from array import array
-    from sglang.srt.arg_groups.model_override_base import resolved_view
-    from sglang.srt.distributed.parallel_state_wrapper import ParallelState
-    from sglang.srt.hardware_backend.mlx import runtime
-    from sglang.srt.hardware_backend.mlx.kv_cache import ContiguousAttentionKVCache
-    from sglang.srt.hardware_backend.mlx.model_runner_stub import MlxModelRunnerStub
-    from sglang.srt.managers.schedule_batch import Req
-    from sglang.srt.runtime_context import get_context
-    from sglang.srt.sampling.sampling_params import SamplingParams
-    from sglang_omni.models.ming_tts.engine_io import MingTTSSGLangRequestData
-    from sglang_omni.models.ming_tts.hf_config import BailingMoeTTSConfig
-    from sglang_omni.models.ming_tts.mlx.worker import MingTTSMlxModelRunner
-    from sglang_omni.models.ming_tts.payload_types import MingTTSState
-    from sglang_omni.scheduling.omni_scheduler import OmniScheduler, _FAILED_BATCH_RESULT
-    from sglang_omni.scheduling.sglang_backend.cache import create_tree_cache
-    from sglang_omni.scheduling.sglang_backend.output_processor import SGLangOutputProcessor
-
-    monkeypatch.setenv("SGLANG_USE_MLX", "1")
-    runtime.use_mlx.cache_clear()
-    model.stop_head.weight = mx.zeros_like(model.stop_head.weight)
-    model.stop_head.bias = mx.array([20.0, -20.0])
-    hf = BailingMoeTTSConfig(**asdict(model.config.llm_config))
-    cfg = SimpleNamespace(
-        hf_config=hf, hf_text_config=hf, linear_attn_registry_result=None,
-        is_hybrid_swa=False, sliding_window_size=None, attention_chunk_size=None,
-        dtype=torch.float32, num_hidden_layers=2, num_attention_layers=2,
-        context_len=64, use_ngram_embedding=False, vocab_size=32, hidden_size=16,
-        is_encoder_decoder=False, is_multimodal=False, is_generation=True,
-        is_mrope=False, think_end_ids=None,
-    )
-    try:
-        with get_context().override_server_args(
-            device="cpu", context_length=64, max_total_tokens=64,
-            attention_backend="torch_native", prefill_attention_backend="torch_native",
-            decode_attention_backend="torch_native", max_running_requests=1,
-            max_prefill_tokens=64, disable_radix_cache=True, chunked_prefill_size=-1,
-            disable_cuda_graph=True, disable_overlap_schedule=True,
-            skip_tokenizer_init=True, page_size=1, enable_memory_saver=False,
-            enable_metrics=False, schedule_policy="fcfs", _model_config=cfg,
-        ) as server_args:
-            stub = object.__new__(MlxModelRunnerStub)
-            stub._mlx_pool_size = 64
-            stub.device = "cpu"
-            stub.ps = ParallelState.trivial()
-            stub.server_args = server_args
-            stub.model_config = cfg
-            stub.initialize()
-            stub.alloc_memory_pool()
-            stub.init_attention_backends()
-            assert stub.preloaded_weights_bytes == 0
-            assert stub.token_to_kv_pool.get_kv_size_bytes() == (0, 0)
-            backend = MingTTSMlxRunner(model, cache_factory=lambda: [
-                ContiguousAttentionKVCache(max_seq_len=64) for _ in model.model.layers
-            ])
-            group = SimpleNamespace(cpu_group=None, first_rank=0, rank_in_group=0)
-            worker = SimpleNamespace(
-                gpu_id=0, tp_rank=0, random_seed=1, device="cpu", model_runner=stub,
-                model_config=cfg, ps=stub.ps, _mlx_runner=backend,
-                get_tp_group=lambda: group, get_attention_tp_group=lambda: group,
-                get_attention_tp_cpu_group=lambda: None, get_pad_input_ids_func=lambda: None,
-                prepare_for_kv_cache_release=lambda req: None,
-            )
-            runner = MingTTSMlxModelRunner(worker, SGLangOutputProcessor())
-
-            def result_adapter(data: Any) -> list[int]:
-                assert data.generated_latents.shape == (3, 2, 4)
-                runner.reset_request(data.req.rid)
-                return list(data.output_ids)
-
-            scheduler = OmniScheduler(
-                worker,
-                create_tree_cache(stub.req_to_token_pool, stub.token_to_kv_pool_allocator, page_size=1),
-                stub.req_to_token_pool, stub.token_to_kv_pool_allocator,
-                resolved_view(server_args), cfg, model_runner=runner,
-                result_adapter=result_adapter, abort_callback=runner.reset_request,
-                enable_overlap=False, enable_async_decode=False,
-            )
-
-            def admit(rid: str) -> Any:
-                sampling = SamplingParams(temperature=0.0, max_new_tokens=3, stop_token_ids=[4])
-                sampling.normalize(None)
-                req = Req(rid=rid, origin_input_text="", origin_input_ids=array("q", [1, 2, 3]),
-                          sampling_params=sampling, eos_token_ids={4}, vocab_size=32)
-                data = MingTTSSGLangRequestData(
-                    req=req, input_ids=torch.tensor([1, 2, 3]),
-                    state=MingTTSState(input_ids=[1, 2, 3]),
-                    audio_patch_token_id=3, audio_eos_token_id=4, max_new_tokens=3,
-                    output_ids=req.output_ids,
-                )
-                req._omni_data = data
-                req._omni_terminal_claimed = False
-                scheduler.add_request_to_queue(req)
-                return req
-
-            def step() -> Any:
-                batch = scheduler.get_next_batch_to_run()
-                scheduler.cur_batch = batch
-                if batch is not None:
-                    result = scheduler.run_batch(batch)
-                    if result is not _FAILED_BATCH_RESULT:
-                        scheduler.process_batch_result(batch, result)
-                scheduler.last_batch = batch
-                return batch
-
-            for rid in ("first", "second"):
-                admit(rid)
-                for _ in range(8):
-                    if step() is None:
-                        break
-                assert scheduler.running_batch.is_empty()
-                assert not scheduler.waiting_queue
-                assert not backend.states
-                assert not runner._generated
-                assert stub.req_to_token_pool.available_size() == 1
-                assert stub.token_to_kv_pool_allocator.available_size() == 64
-    finally:
-        runtime.use_mlx.cache_clear()

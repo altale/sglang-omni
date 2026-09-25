@@ -20,7 +20,11 @@ _REPO_ROOT = Path(__file__).resolve().parents[3]
 
 
 @pytest.mark.parametrize(
-    "filename", ["ming_omni_tts.yaml", "ming_omni_tts_apple_mlx.yaml"]
+    "filename", [
+        "ming_omni_tts.yaml",
+        "ming_omni_tts_apple_mlx.yaml",
+        "ming_omni_tts_apple_mps.yaml",
+    ]
 )
 def test_example_process_topology_compiles(filename: str) -> None:
     config_path = _REPO_ROOT / "examples/configs" / filename

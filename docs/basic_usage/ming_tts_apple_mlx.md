@@ -2,8 +2,9 @@
 
 This implementation targets `inclusionAI/Ming-omni-tts-16.8B-A3B`, not the
 separate dense 0.5B model. Initial MLX Q4 HTTP audio generation has been manually
-validated on an M4 Pro with 48 GiB memory. Torch/MPS support, broader numerical
-and audio-quality qualification, and performance measurements remain pending.
+validated on an M4 Pro with 48 GiB memory. A separate Torch/MPS compatibility
+path is implemented but awaits real-weight validation; broader numerical and
+audio-quality qualification and performance measurements remain pending.
 
 ## Backend and configuration
 
@@ -65,13 +66,63 @@ server launch environment; FFmpeg 9 alone did not satisfy its library requiremen
 
 ## Validation
 
+### Torch/MPS compatibility
+
+Select `SGLANG_USE_MLX=0` and
+[`ming_omni_tts_apple_mps.yaml`](../../examples/configs/ming_omni_tts_apple_mps.yaml)
+to use Torch on MPS. This path supports one active request, TP=1, non-streaming
+text synthesis and reference-voice conditioning. Streaming requests are rejected
+in preprocessing. Use the official unquantized checkpoint; `mlx_q4`/`mlx_q8`
+are MLX-only and are not accepted by the Torch/MPS builder.
+
+Torch/MPS reuses the CUDA path's SGLang BailingMoE backbone, model runner and
+paged KV pools, with `torch_native` attention and native Torch MoE/RoPE operators.
+FlowLoss, Aggregator, reference encoder, weight coverage checks and acoustic
+recurrence are shared as well; there is no separate Torch backbone or
+request-local Transformers cache. AudioVAE neural computation runs on
+MPS, with complex spectrum construction and ISTFT explicitly on CPU. CampPlus
+also remains on CPU. This path does not enable a global unsupported-operator
+fallback.
+
+The sample profile uses BF16, without quantization, graphs, compile, prefix reuse,
+chunked prefill or overlap. Its memory fractions are provisional: unlike the
+manually tested MLX Q4 profile, fitting full-precision A3B on a 48 GiB Mac has
+not been established. This is a compatibility path, not a performance claim.
+
+Manual launch (not part of unit tests):
+
+```bash
+HF_HUB_OFFLINE=1 SGLANG_USE_MLX=0 \
+.venv-apple/bin/sgl-omni serve \
+  --model-path "$MING_MODEL_DIR" \
+  --config examples/configs/ming_omni_tts_apple_mps.yaml \
+  --model-name ming-omni-tts --host 127.0.0.1 --port 8000
+```
+
+Use non-streaming `/v1/audio/speech` requests. Reference audio needs the same
+TorchCodec/FFmpeg setup described above. MPS validation has not yet been run with
+real weights or HTTP; the following tests use only tiny synthetic models:
+
+```bash
+HF_HUB_OFFLINE=1 SGLANG_USE_MLX=0 \
+.venv-apple/bin/python -m pytest -q \
+  tests/unit_test/ming_tts/test_torch_mps_backbone.py \
+  tests/unit_test/ming_tts/test_torch_mps_runtime.py \
+  tests/unit_test/ming_tts/test_apple_runtime.py \
+  tests/unit_test/ming_tts/test_sglang_model.py \
+  tests/unit_test/ming_tts/test_model_runner.py \
+  tests/unit_test/ming_omni/test_audio_vae_attention.py
+```
+
+### Native MLX
+
 On a Metal-capable terminal, using the project's `.venv-apple`:
 
 ```bash
 .venv-apple/bin/python -m pytest -q \
   tests/unit_test/ming_tts/test_mlx_config.py \
   tests/unit_test/ming_tts/test_mlx_loading.py \
-  tests/unit_test/ming_tts/test_mlx_runtime.py \
+  tests/unit_test/ming_tts/test_apple_runtime.py \
   tests/unit_test/ming_tts/test_mlx_model_metal.py \
   tests/unit_test/ming_tts/test_mlx_audio_metal.py
 ```

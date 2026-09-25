@@ -15,8 +15,6 @@ def ming_tts_uses_mlx() -> bool:
     selected = use_mlx()
     if selected and not current_platform.is_mps():
         raise ValueError("Ming native MLX requires Apple Silicon / Metal")
-    if current_platform.is_mps() and not selected:
-        raise ValueError("Ming on Apple requires SGLANG_USE_MLX=1; Torch/MPS is not supported")
     return selected
 
 
@@ -79,3 +77,42 @@ class MingTtsMlxEngineBuilder(MingTtsEngineBuilder):
 
     def make_adapters(self, model: Any) -> tuple[Any, Any]:
         return super().make_adapters(self._model_worker._mlx_runner.model)
+
+
+class MingTtsTorchMpsEngineBuilder(MingTtsEngineBuilder):
+    def generation_defaults(self, *, dtype: str) -> dict[str, Any]:
+        return {
+            **super().generation_defaults(dtype=dtype),
+            "max_running_requests": 1,
+            "max_total_tokens": self.context_length,
+            "max_prefill_tokens": self.context_length,
+            "attention_backend": "torch_native",
+        }
+
+    def adjust_overrides(self, overrides: dict[str, Any]) -> None:
+        super().adjust_overrides(overrides)
+        if self.tp_size != 1 or self.tp_rank != 0:
+            raise ValueError("Ming Torch/MPS requires TP=1")
+        if int(overrides["max_running_requests"]) != 1:
+            raise ValueError("Ming Torch/MPS requires max_running_requests=1")
+        if not overrides["disable_cuda_graph"]:
+            raise ValueError("Ming Torch/MPS requires disable_cuda_graph=true")
+        for phase in (
+            "attention_backend",
+            "prefill_attention_backend",
+            "decode_attention_backend",
+        ):
+            if overrides.get(phase) not in (None, "torch_native"):
+                raise ValueError(f"Ming Torch/MPS requires {phase}=torch_native")
+        if overrides.get("quantization") is not None:
+            raise ValueError(
+                "Ming Torch/MPS does not support quantization; use MLX for mlx_q4"
+            )
+        if overrides.get("speculative_algorithm") is not None:
+            raise ValueError("Ming Torch/MPS does not support speculative decoding")
+        if min(
+            int(overrides["max_total_tokens"]), int(overrides["max_prefill_tokens"])
+        ) < self.context_length:
+            raise ValueError(
+                "Ming Torch/MPS requires a full context token pool and unsplit prefill"
+            )

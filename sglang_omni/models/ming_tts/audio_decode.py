@@ -31,7 +31,42 @@ from sglang_omni.utils.audio_payload import audio_waveform_payload
 logger = logging.getLogger(__name__)
 
 
-class MingAudioDecoder:
+class MingTorchAudioDecoder:
+    def __init__(self, audio_vae: AudioVAE) -> None:
+        self._audio_vae = audio_vae
+
+    @property
+    def sample_rate(self) -> int:
+        return int(self._audio_vae.config.sample_rate)
+
+    @torch.inference_mode()
+    def decode_full(self, latents: torch.Tensor) -> torch.Tensor:
+        if int(latents.shape[0]) == 0:
+            return torch.empty((0,), dtype=torch.float32)
+
+        first_parameter = next(self._audio_vae.parameters())
+        device = first_parameter.device
+        dtype = first_parameter.dtype
+        context = (
+            torch.autocast(device_type=device.type, dtype=dtype)
+            if device.type in ("cuda", "mps") and dtype in (torch.float16, torch.bfloat16)
+            else nullcontext()
+        )
+        with context:
+            latents = latents.to(device=device, dtype=dtype)
+            sequence = latents.reshape(1, -1, latents.shape[-1])
+            waveform, _, _ = self._audio_vae.decode(
+                sequence,
+                past_key_values=None,
+                use_cache=False,
+                stream_state=(None, None, None),
+                last_chunk=True,
+            )
+
+        return waveform[0, 0].detach().to(device="cpu", dtype=torch.float32)
+
+
+class MingAudioDecoder(MingTorchAudioDecoder):
     def __init__(
         self,
         audio_vae: AudioVAE,
@@ -40,7 +75,7 @@ class MingAudioDecoder:
         max_stream_step_latents: int,
         streaming_cuda_graph_required: bool,
     ) -> None:
-        self._audio_vae = audio_vae
+        super().__init__(audio_vae)
         # Note (yzxiao): Keep the fixed transition Ming-TTS-private while reusing
         # the shared Decoder, so Ming-Omni and full decode keep their existing paths.
         self._streaming_transition = AudioVAEFixedStreamingTransition(
@@ -52,10 +87,6 @@ class MingAudioDecoder:
             self._streaming_transition,
             cuda_graph_required=streaming_cuda_graph_required,
         )
-
-    @property
-    def sample_rate(self) -> int:
-        return int(self._audio_vae.config.sample_rate)
 
     @property
     def stream_capacity(self) -> int:
@@ -89,36 +120,6 @@ class MingAudioDecoder:
 
     def close(self) -> None:
         self._streaming_runner.close()
-
-    @torch.inference_mode()
-    def decode_full(
-        self,
-        latents: torch.Tensor,
-    ) -> torch.Tensor:
-        if int(latents.shape[0]) == 0:
-            return torch.empty((0,), dtype=torch.float32)
-
-        first_parameter = next(self._audio_vae.parameters())
-        device = first_parameter.device
-        dtype = first_parameter.dtype
-        context = (
-            torch.autocast(device_type="cuda", dtype=dtype)
-            if device.type == "cuda" and dtype in (torch.float16, torch.bfloat16)
-            else nullcontext()
-        )
-        with context:
-            latents = latents.to(device=device, dtype=dtype)
-            sequence = latents.reshape(1, -1, latents.shape[-1])
-            waveform, _, _ = self._audio_vae.decode(
-                sequence,
-                past_key_values=None,
-                use_cache=False,
-                stream_state=(None, None, None),
-                last_chunk=True,
-            )
-
-        return waveform[0, 0].detach().to(device="cpu", dtype=torch.float32)
-
 
 @dataclass(frozen=True, slots=True)
 class AudioVAEFixedStreamingOutput:
@@ -1248,7 +1249,7 @@ class MingAudioStreamingRunner:
 
 def decode_ming_tts_audio_payload(
     payload: StagePayload,
-    decoder: MingAudioDecoder,
+    decoder: MingTorchAudioDecoder,
     *,
     keep_latents: bool = False,
 ) -> StagePayload:

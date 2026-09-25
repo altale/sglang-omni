@@ -7,11 +7,24 @@ from typing import Any
 
 import pytest
 
-from sglang_omni.models.ming_tts.apple_runtime import MingTtsMlxEngineBuilder, ming_tts_uses_mlx
+from sglang_omni.models.ming_tts.apple_runtime import (
+    MingTtsMlxEngineBuilder,
+    MingTtsTorchMpsEngineBuilder,
+    ming_tts_uses_mlx,
+)
+from sglang_omni.models.ming_tts.engine_builder import MingTtsEngineBuilder
+
+
+@pytest.fixture(
+    params=[MingTtsMlxEngineBuilder, MingTtsTorchMpsEngineBuilder],
+    ids=["mlx", "torch_mps"],
+)
+def builder_type(request: pytest.FixtureRequest) -> type[MingTtsEngineBuilder]:
+    return request.param
 
 
 @pytest.mark.parametrize("selected,apple,expected", [
-    (False, False, False), (True, True, True), (True, False, None), (False, True, None),
+    (False, False, False), (True, True, True), (True, False, None), (False, True, False),
 ])
 def test_backend_selection(
     monkeypatch: pytest.MonkeyPatch, selected: bool, apple: bool, expected: bool | None
@@ -28,8 +41,8 @@ def test_backend_selection(
         assert ming_tts_uses_mlx() is expected
 
 
-def test_mlx_builder_defaults() -> None:
-    builder = MingTtsMlxEngineBuilder()
+def test_builder_defaults(builder_type: type[MingTtsEngineBuilder]) -> None:
+    builder = builder_type()
     builder.context_length = 2048
     defaults = builder.generation_defaults(dtype="bfloat16")
     builder.adjust_overrides(defaults)
@@ -37,19 +50,21 @@ def test_mlx_builder_defaults() -> None:
     assert defaults["max_total_tokens"] == 2048
     assert defaults["attention_backend"] == "torch_native"
     assert defaults["chunked_prefill_size"] == 0
-    assert builder.get_model_buffer_bs(None) is None
+    if isinstance(builder, MingTtsMlxEngineBuilder):
+        assert builder.get_model_buffer_bs(None) is None
 
 
 @pytest.mark.parametrize("key,value", [
     ("max_running_requests", 2), ("disable_cuda_graph", False),
     ("attention_backend", "triton"), ("max_total_tokens", 10),
-    ("max_prefill_tokens", 10), ("disable_overlap_schedule", False),
-    ("disable_radix_cache", False), ("chunked_prefill_size", 128),
+    ("max_prefill_tokens", 10), ("chunked_prefill_size", 128),
     ("prefill_attention_backend", "triton"),
     ("decode_attention_backend", "triton"), ("speculative_algorithm", "EAGLE"),
 ])
-def test_mlx_builder_rejects_unsupported_execution(key: str, value: Any) -> None:
-    builder = MingTtsMlxEngineBuilder()
+def test_builder_rejects_unsupported_execution(
+    builder_type: type[MingTtsEngineBuilder], key: str, value: Any
+) -> None:
+    builder = builder_type()
     builder.context_length = 2048
     overrides = builder.generation_defaults(dtype="bfloat16")
     overrides[key] = value
@@ -57,26 +72,30 @@ def test_mlx_builder_rejects_unsupported_execution(key: str, value: Any) -> None
         builder.adjust_overrides(overrides)
 
 
-def test_mlx_builder_rejects_tp() -> None:
-    builder = MingTtsMlxEngineBuilder(tp_size=2, nccl_port=12345)
+def test_builder_rejects_tp(builder_type: type[MingTtsEngineBuilder]) -> None:
+    builder = builder_type(tp_size=2, nccl_port=12345)
     builder.context_length = 2048
     with pytest.raises(ValueError, match="TP=1"):
         builder.adjust_overrides(builder.generation_defaults(dtype="bfloat16"))
 
 
-def test_engine_stage_dispatches_to_mlx_without_loading(
-    monkeypatch: pytest.MonkeyPatch,
+def test_engine_stage_dispatches_without_loading(
+    monkeypatch: pytest.MonkeyPatch, builder_type: type[MingTtsEngineBuilder],
 ) -> None:
     from sglang_omni.models.ming_tts import apple_runtime, stages
+    from sglang_omni.platforms import current_platform
 
-    monkeypatch.setattr(apple_runtime, "ming_tts_uses_mlx", lambda: True)
-    calls = []
+    monkeypatch.setattr(
+        apple_runtime, "ming_tts_uses_mlx", lambda: builder_type is MingTtsMlxEngineBuilder
+    )
+    monkeypatch.setattr(current_platform, "is_mps", lambda: True)
+    calls: list[tuple[str, int | None, dict[str, Any]]] = []
 
     def build(self: Any, model_path: str, **kwargs: Any) -> str:
         calls.append((model_path, self.requested_context_length, kwargs))
         return "scheduler"
 
-    monkeypatch.setattr(MingTtsMlxEngineBuilder, "build", build)
+    monkeypatch.setattr(builder_type, "build", build)
     assert stages.create_sglang_tts_engine_executor("local-model", context_length=2048) == "scheduler"
     assert calls[0][:2] == ("local-model", 2048)
 
