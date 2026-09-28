@@ -102,11 +102,11 @@ class ISTFT(nn.Module):
     def forward(
         self,
         spec: torch.Tensor,
-        audio_buffer: torch.Tensor | None = None,
-        window_buffer: torch.Tensor | None = None,
-        streaming: bool = False,
-        last_chunk: bool = False,
-    ) -> torch.Tensor | tuple[torch.Tensor, torch.Tensor | None, torch.Tensor | None]:
+        audio_buffer=None,
+        window_buffer=None,
+        streaming=False,
+        last_chunk=False,
+    ):
         """
         Compute the Inverse Short Time Fourier Transform (ISTFT) of a complex spectrogram.
 
@@ -123,8 +123,9 @@ class ISTFT(nn.Module):
             Tensor: Reconstructed time-domain signal of shape (B, L), where L is the length of the output signal.
         """
         if spec.device.type == "npu" or self.window.device.type == "mps":
-            # NPU's large fold can fault; MPS cannot run the complex FFT path.
-            # Keep neural decoding on the accelerator and reconstruct on CPU.
+            # The large overlap-add used by Ming (n_fft=3528) can trigger an
+            # Ascend vector-core fault in torch.nn.functional.fold. Keep the
+            # neural decoder and spectrogram on NPU, but run only ISTFT on CPU.
             spec = spec.cpu()
             audio_buffer = audio_buffer.cpu() if audio_buffer is not None else None
             window_buffer = window_buffer.cpu() if window_buffer is not None else None

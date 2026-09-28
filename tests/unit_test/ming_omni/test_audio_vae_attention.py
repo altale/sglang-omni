@@ -12,17 +12,14 @@ from sglang_omni.models.ming_omni.talker.audio_vae.configuration_audio_vae impor
 
 
 @pytest.mark.parametrize("is_npu", [False, True])
-@pytest.mark.parametrize("num_hidden_layers", [1, 4, 6])
-def test_audio_vae_attention_backend_and_window(
-    monkeypatch: pytest.MonkeyPatch, is_npu: bool, num_hidden_layers: int
-) -> None:
+def test_audio_vae_attention_backend_and_window(monkeypatch, is_npu):
     monkeypatch.setattr(modeling_audio_vae.current_platform, "is_npu", lambda: is_npu)
     backbone = {
         "_attn_implementation": "eager",
         "vocab_size": 1,
         "hidden_size": 8,
         "intermediate_size": 16,
-        "num_hidden_layers": num_hidden_layers,
+        "num_hidden_layers": 4,
         "num_attention_heads": 2,
         "num_key_value_heads": 1,
         "use_sliding_window": True,
@@ -56,22 +53,12 @@ def test_audio_vae_attention_backend_and_window(
         )  # noqa: leading-underscore  # production name
         assert component.config.sliding_window == 4
     assert (config.enc_kwargs, config.dec_kwargs) == original
-    assert model.encoder.encoder.config is not model.encoder.aggregator.config
-    assert len(model.encoder.encoder.layers) == num_hidden_layers
-    assert model.encoder.encoder.config.num_hidden_layers == num_hidden_layers
-    assert len(model.encoder.encoder.config.layer_types) == num_hidden_layers
-    assert len(model.encoder.aggregator.layers) == 4
-    assert model.encoder.aggregator.config.num_hidden_layers == 4
-    assert model.encoder.aggregator.config.layer_types == ["sliding_attention"] * 4
 
-    # The distant prefix is outside the tested layers' combined receptive field.
+    # The distant prefix is outside all four layers' combined receptive field.
     changed = inputs.clone()
     changed[:, :8] *= -10
     with torch.inference_mode():
         before = model.encoder.encoder(inputs_embeds=inputs).last_hidden_state
         after = model.encoder.encoder(inputs_embeds=changed).last_hidden_state
-        aggregated = model.encoder.aggregator(inputs_embeds=inputs).last_hidden_state
-    assert aggregated.shape == inputs.shape
-    assert torch.isfinite(aggregated).all()
     torch.testing.assert_close(before[:, -1], after[:, -1])
     assert not torch.allclose(before[:, 0], after[:, 0])

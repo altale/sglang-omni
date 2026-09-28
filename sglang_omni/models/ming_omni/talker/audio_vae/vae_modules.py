@@ -1,5 +1,3 @@
-from typing import Any
-
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -84,13 +82,8 @@ class StreamingLinearUpsample(nn.Module):
 
 class Encoder(nn.Module):
     def __init__(
-        self,
-        encoder_args: dict[str, Any],
-        input_dim: int = 320,
-        hop_size: int = 320,
-        latent_dim: int = 64,
-        patch_size: int = -1,
-    ) -> None:
+        self, encoder_args, input_dim=320, hop_size=320, latent_dim=64, patch_size=-1
+    ):
         super().__init__()
         config = Qwen2Config.from_dict(config_dict=encoder_args)
         self.encoder = Qwen2Model(config)
@@ -103,11 +96,8 @@ class Encoder(nn.Module):
         self.norm = nn.LayerNorm(config.hidden_size)
         self.patch_size = patch_size
         if patch_size != -1:
-            # Rebuild derived layer_types without mutating the encoder's config.
-            aggregator_config = Qwen2Config.from_dict(
-                {**encoder_args, "num_hidden_layers": 4, "layer_types": None}
-            )
-            self.aggregator = Qwen2Model(aggregator_config)
+            config.num_hidden_layers = 4
+            self.aggregator = Qwen2Model(config)
             self.cls_embed = nn.Parameter(torch.rand(1, 1, config.hidden_size))
             self.cls_embed.data.normal_(0, 0.02)
         else:

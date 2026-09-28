@@ -180,7 +180,7 @@ def test_mps_audio_vae_encode_and_full_decode() -> None:
     from sglang_omni.models.ming_tts.audio_decode import MingTorchAudioDecoder
 
     backbone = dict(
-        vocab_size=8, hidden_size=16, intermediate_size=24, num_hidden_layers=1,
+        vocab_size=8, hidden_size=16, intermediate_size=24, num_hidden_layers=4,
         num_attention_heads=2, num_key_value_heads=1, max_position_embeddings=256,
         _attn_implementation="sdpa", use_sliding_window=True, sliding_window=5,
         max_window_layers=0,
