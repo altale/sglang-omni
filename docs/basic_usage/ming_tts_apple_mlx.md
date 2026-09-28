@@ -3,20 +3,39 @@
 This implementation targets `inclusionAI/Ming-omni-tts-16.8B-A3B`, not the
 separate dense 0.5B model. Initial MLX Q4 HTTP audio generation has been manually
 validated on an M4 Pro with 48 GiB memory. A separate Torch/MPS compatibility
-path is implemented but awaits real-weight validation; broader numerical and
+path has passed short text-only real-weight HTTP tests; broader numerical and
 audio-quality qualification and performance measurements remain pending.
 
 ## Backend and configuration
 
-Use the existing Apple environment and select `SGLANG_USE_MLX=1`. The profile is
-[`ming_omni_tts_apple_mlx.yaml`](../../examples/configs/ming_omni_tts_apple_mlx.yaml).
+Use the existing Apple environment and select `SGLANG_USE_MLX=1`. The model's
+default pipeline needs no Apple-specific YAML. Set `MING_MODEL_DIR` to the local
+official checkpoint directory, then launch:
+
+```bash
+HF_HUB_OFFLINE=1 SGLANG_USE_MLX=1 \
+.venv-apple/bin/sgl-omni serve \
+  --model-path "$MING_MODEL_DIR" \
+  --preprocessing.factory.context_length 2048 \
+  --reference_encode.factory.context_length 2048 \
+  --tts_engine.factory.context_length 2048 \
+  --tts_engine.engine.quantization mlx_q4 \
+  --model-name ming-omni-tts --host 127.0.0.1 --port 8000
+```
+
+All four stages share the default `pipeline` process. No per-stage memory
+fractions are specified; this is not a memory usage limit. Previous real-weight
+tests used a three-process configuration; these simplified single-process launch
+commands still need E2E revalidation. The CUDA example YAML is not an Apple preset.
+
 The four stages and speech API payloads are unchanged. Torch CPU tensors remain
 at stage boundaries; model computation uses MLX, not Torch/MPS. CampPlus still
 uses the existing CPU ONNX speaker encoder.
 
-The profile allows one active generation request, TP=1, one decoder stream slot
-and a 2048-token context. It disables radix/prefix reuse, chunked prefill, CUDA
-graphs and overlap/lookahead execution. `torch_native` is only the CPU scheduler
+The Apple defaults allow one active generation request, TP=1 and one decoder
+stream slot; the command sets a 2048-token context. They disable radix/prefix
+reuse, chunked prefill, CUDA graphs and overlap/lookahead execution.
+`torch_native` is only the CPU scheduler
 bookkeeping backend, not the model's attention backend.
 
 Ming uses a model-specific scheduler runner because the generic SGLang MLX
@@ -33,7 +52,7 @@ files and `campplus.onnx`. Loading is strict for each component. The AR stage
 excludes AudioVAE, the unused LM head and known runtime rotary buffers; audio
 stages load only the encoder or decoder they own. No checkpoint code is executed.
 
-The profile selects `quantization: mlx_q4`: on-load, group-size-64 quantization
+The command selects `mlx_q4`: on-load, group-size-64 quantization
 of backbone linear/expert layers only. `mlx_q8` is also accepted. Remove this
 setting to retain checkpoint precision. Embeddings, routers, CFM/DiT, Aggregator,
 stop/speaker heads and AudioVAE are not quantized. Prequantized community
@@ -68,10 +87,9 @@ server launch environment; FFmpeg 9 alone did not satisfy its library requiremen
 
 ### Torch/MPS compatibility
 
-Select `SGLANG_USE_MLX=0` and
-[`ming_omni_tts_apple_mps.yaml`](../../examples/configs/ming_omni_tts_apple_mps.yaml)
-to use Torch on MPS. This path supports one active request, TP=1, non-streaming
-text synthesis and reference-voice conditioning. Streaming requests are rejected
+Select `SGLANG_USE_MLX=0` to use Torch on MPS. This path supports one active
+request, TP=1, non-streaming text synthesis and reference-voice conditioning.
+Streaming requests are rejected
 in preprocessing. Use the official unquantized checkpoint; `mlx_q4`/`mlx_q8`
 are MLX-only and are not accepted by the Torch/MPS builder.
 
@@ -84,10 +102,9 @@ MPS, with complex spectrum construction and ISTFT explicitly on CPU. CampPlus
 also remains on CPU. This path does not enable a global unsupported-operator
 fallback.
 
-The sample profile uses BF16, without quantization, graphs, compile, prefix reuse,
-chunked prefill or overlap. Its memory fractions are provisional: unlike the
-manually tested MLX Q4 profile, fitting full-precision A3B on a 48 GiB Mac has
-not been established. This is a compatibility path, not a performance claim.
+The defaults use BF16, without quantization, graphs, compile, prefix reuse,
+chunked prefill or overlap. Short text-only generation succeeded on an M4 Pro
+with 48 GiB memory; peak and sustained memory usage remain unmeasured.
 
 Manual launch (not part of unit tests):
 
@@ -95,19 +112,22 @@ Manual launch (not part of unit tests):
 HF_HUB_OFFLINE=1 SGLANG_USE_MLX=0 \
 .venv-apple/bin/sgl-omni serve \
   --model-path "$MING_MODEL_DIR" \
-  --config examples/configs/ming_omni_tts_apple_mps.yaml \
+  --preprocessing.factory.context_length 2048 \
+  --reference_encode.factory.context_length 2048 \
+  --tts_engine.factory.context_length 2048 \
   --model-name ming-omni-tts --host 127.0.0.1 --port 8000
 ```
 
 Use non-streaming `/v1/audio/speech` requests. Reference audio needs the same
-TorchCodec/FFmpeg setup described above. MPS validation has not yet been run with
-real weights or HTTP; the following tests use only tiny synthetic models:
+TorchCodec/FFmpeg setup described above. A concurrency-one text-only benchmark
+completed five requests without failures (mean latency 3.62 s, mean RTF 0.8218).
+Reference-conditioned MPS generation remains unvalidated. The following unit
+tests use synthetic models, not real checkpoints:
 
 ```bash
 HF_HUB_OFFLINE=1 SGLANG_USE_MLX=0 \
 .venv-apple/bin/python -m pytest -q \
   tests/unit_test/ming_tts/test_torch_mps_backbone.py \
-  tests/unit_test/ming_tts/test_torch_mps_runtime.py \
   tests/unit_test/ming_tts/test_apple_runtime.py \
   tests/unit_test/ming_tts/test_sglang_model.py \
   tests/unit_test/ming_tts/test_model_runner.py \
@@ -120,7 +140,6 @@ On a Metal-capable terminal, using the project's `.venv-apple`:
 
 ```bash
 .venv-apple/bin/python -m pytest -q \
-  tests/unit_test/ming_tts/test_mlx_config.py \
   tests/unit_test/ming_tts/test_mlx_loading.py \
   tests/unit_test/ming_tts/test_apple_runtime.py \
   tests/unit_test/ming_tts/test_mlx_model_metal.py \

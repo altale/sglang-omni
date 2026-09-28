@@ -248,6 +248,35 @@ def create_reference_encode_executor(
     return SimpleScheduler(_encode, max_concurrency=max_concurrency)
 
 
+def create_mlx_audio_decode_executor(
+    model_path: str,
+    *,
+    keep_latents: bool,
+    initial_chunk_patches: int,
+    steady_chunk_patches: int,
+) -> Any:
+    from sglang_omni.models.ming_tts.mlx.audio_io import MingMlxAudioDecoder
+    from sglang_omni.models.ming_tts.mlx.config import ModelConfig
+    from sglang_omni.models.ming_tts.mlx.loading import load_ming_audio_vae, read_config
+    from sglang_omni.models.ming_tts.streaming_vocoder import (
+        MingTTSStreamingVocoderScheduler,
+    )
+
+    path = _resolve_checkpoint(model_path)
+    config = ModelConfig.from_dict(read_config(path))
+    decoder = MingMlxAudioDecoder(load_ming_audio_vae(path, component="decoder"))
+    scheduler = MingTTSStreamingVocoderScheduler(
+        decoder,
+        patch_size=config.patch_size,
+        latent_dim=config.latent_dim,
+        initial_chunk_patches=initial_chunk_patches,
+        steady_chunk_patches=steady_chunk_patches,
+        keep_latents=keep_latents,
+    )
+    scheduler.warmup_now()
+    return scheduler
+
+
 def create_audio_decode_executor(
     model_path: str,
     *,
@@ -279,8 +308,6 @@ def create_audio_decode_executor(
     from sglang_omni.models.ming_tts.apple_runtime import ming_tts_uses_mlx
 
     if ming_tts_uses_mlx():
-        from .mlx.stages import create_mlx_audio_decode_executor
-
         if streaming_cuda_graph or stream_slots != 1:
             raise ValueError(
                 "Ming MLX audio decode requires streaming_cuda_graph=false "

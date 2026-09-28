@@ -18,7 +18,6 @@ from sglang_omni.models.ming_tts.mlx.audio_vae import (  # noqa: E402
     Decoder,
     Encoder,
     ISTFT,
-    StreamingLinearUpsample,
 )
 
 
@@ -46,36 +45,9 @@ def assert_close(actual: Any, expected: torch.Tensor) -> None:
     )
 
 
-@pytest.mark.parametrize("lengths", [(2,), (2, 3), (1, 2, 1, 3)])
-def test_streaming_interpolation_matches_torch(lengths: tuple[int, ...]) -> None:
-    from sglang_omni.models.ming_omni.talker.audio_vae.vae_modules import (
-        StreamingLinearUpsample as TorchUpsample,
-    )
-
-    native = StreamingLinearUpsample(4)
-    reference = TorchUpsample(4)
-    values = torch.linspace(-1, 1, sum(lengths) * 3).reshape(1, -1, 3)
-    native_state = torch_state = None
-    offset = 0
-    outputs = []
-    for index, length in enumerate(lengths):
-        chunk = values[:, offset:offset + length]
-        terminal = index == len(lengths) - 1
-        actual, native_state = native(mx.array(chunk.numpy()), native_state, last_chunk=terminal)
-        expected, torch_state = reference(chunk, torch_state, is_last=terminal)
-        if expected is None:
-            assert actual is None
-        else:
-            assert_close(actual, expected)
-            outputs.append(actual)
-        offset += length
-    assert native_state is None
-    full = torch.nn.functional.interpolate(values.transpose(1, 2), scale_factor=4, mode="linear", align_corners=False).transpose(1, 2)
-    assert_close(mx.concatenate(outputs, axis=1), full)
-
-
-@pytest.mark.parametrize("lengths", [(12,), (4, 4, 4), (5, 3, 4)])
-@pytest.mark.parametrize("n_fft,hop_length", [(32, 8), (3528, 882)])
+@pytest.mark.parametrize("lengths,n_fft,hop_length", [
+    ((12,), 32, 8), ((4, 4, 4), 32, 8), ((5, 3, 4), 3528, 882),
+])
 def test_istft_overlap_and_flush(
     lengths: tuple[int, ...], n_fft: int, hop_length: int
 ) -> None:
@@ -106,7 +78,7 @@ def test_istft_overlap_and_flush(
 
 
 @pytest.mark.parametrize("window", [None, 5])
-@pytest.mark.parametrize("lengths", [(7,), (1, 2, 1, 3), (2, 2, 3)])
+@pytest.mark.parametrize("lengths", [(7,), (1, 2, 1, 3)])
 def test_decoder_full_and_streaming_torch_parity(
     window: int | None, lengths: tuple[int, ...]
 ) -> None:

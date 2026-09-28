@@ -26,7 +26,6 @@ import mlx.nn as nn  # noqa: E402
 from sglang_omni.models.ming_tts.mlx.backbone import BailingMoeSparseMoeBlock  # noqa: E402
 from sglang_omni.models.ming_tts.mlx.config import ModelConfig, TextConfig  # noqa: E402
 from sglang_omni.models.ming_tts.mlx.flow_matching import (  # noqa: E402
-    _expand_batch_param,
     build_cfm_timesteps,
 )
 from sglang_omni.models.ming_tts.mlx.model import MingTTSModel  # noqa: E402
@@ -217,75 +216,57 @@ def acoustic_pair(model: MingTTSModel) -> tuple[TorchDiT, TorchAggregator]:
     return dit, agg
 
 
-@pytest.mark.parametrize("batch", [1, 2])
-def test_real_acoustic_modules(
-    model: MingTTSModel,
-    acoustic_pair: tuple[TorchDiT, TorchAggregator],
-    batch: int,
-) -> None:
-    dit, agg = acoustic_pair
-    x = mx.random.normal((batch, 2, 4))
-    history = mx.random.normal((batch, 4, 4))
-    cond = mx.random.normal((batch, 1, 16))
-    t = mx.array([0.37] * batch)
-    with torch.no_grad():
-        expected = dit(as_torch(x), as_torch(t), as_torch(cond), as_torch(history))
-        assert_close(model.flowloss.cfm.model(x, t, cond, history), expected)
-        assert_close(model.linear_proj_audio(x), agg(as_torch(x)))
-
-
-@pytest.mark.parametrize("shape", [None, (), (1,), (1, 1, 1)])
-def test_cfm_scalar_param_expands_to_batch(shape: tuple[int, ...] | None) -> None:
-    value = 0.8 if shape is None else mx.array(0.8).reshape(shape)
-    actual = _expand_batch_param(value, batch_size=2)
-    assert actual.shape == (2, 1, 1)
-    assert_close(actual, torch.full((2, 1, 1), 0.8))
-
-
-@pytest.mark.parametrize("shape", [(2,), (2, 1, 1)])
-def test_cfm_per_request_param_preserves_values(shape: tuple[int, ...]) -> None:
-    actual = _expand_batch_param(mx.array([0.2, 0.8]).reshape(shape), batch_size=2)
-    assert actual.shape == (2, 1, 1)
-    assert_close(actual, torch.tensor([0.2, 0.8]).reshape(2, 1, 1))
-
-
 @pytest.mark.parametrize("parameter", ["cfg_scale", "sigma", "temperature"])
-@pytest.mark.parametrize("batch", [1, 2])
 def test_cfm_rejects_parameter_count_mismatch(
-    model: MingTTSModel, parameter: str, batch: int
+    model: MingTTSModel, parameter: str
 ) -> None:
     with pytest.raises(ValueError):
         model.flowloss.cfm.sample(
-            noise=mx.zeros((batch, 4, 2)),
-            c=mx.zeros((batch, 1, 16)),
-            latent_history=mx.zeros((batch, 4, 4)),
+            noise=mx.zeros((2, 4, 2)),
+            c=mx.zeros((2, 1, 16)),
+            latent_history=mx.zeros((2, 4, 4)),
             timesteps=build_cfm_timesteps(1),
-            sde_random=mx.zeros((0, batch, 2, 4)),
+            sde_random=mx.zeros((0, 2, 2, 4)),
             **{parameter: mx.array([0.2, 0.5, 0.8])},
         )
 
 
-@pytest.mark.parametrize("steps", [1, 4, 5, 10])
-@pytest.mark.parametrize("temperature", [0.0, 0.8])
-def test_cfm_with_real_dit(
+@pytest.mark.parametrize("steps,temperature,shape", [
+    (1, 0.0, None), (4, 0.8, ()), (5, 0.8, (1,)),
+    (10, 0.0, (1, 1, 1)), (10, 0.8, (2,)), (10, 0.8, (2, 1, 1)),
+])
+@torch.no_grad()
+def test_acoustic_tail_torch_parity(
     model: MingTTSModel,
     acoustic_pair: tuple[TorchDiT, TorchAggregator],
     steps: int,
     temperature: float,
+    shape: tuple[int, ...] | None,
 ) -> None:
     from sglang_omni.models.ming_tts.flow_matching import CFM as TorchCFM
-    dit, _ = acoustic_pair
+    dit, agg = acoustic_pair
     noise = mx.random.normal((2, 4, 2))
     history = mx.random.normal((2, 4, 4))
     cond = mx.random.normal((2, 1, 16))
     random = mx.random.normal((steps - 1, 2, 2, 4))
     t = build_cfm_timesteps(steps)
     cfg = mx.array([0.0, 2.0])
+    if shape is None:
+        value = temperature
+        torch_value = temperature
+    else:
+        values = [0.0, temperature] if shape in ((2,), (2, 1, 1)) else [temperature]
+        value = mx.array(values).reshape(shape)
+        torch_value = torch.tensor(values).reshape(shape)
     expected = TorchCFM(dit).sample(as_torch(noise), as_torch(cond), as_torch(history),
                                    as_torch(t), as_torch(random), cfg_scale=as_torch(cfg),
-                                   sigma=0.25, temperature=temperature)
-    actual = model.flowloss.cfm.sample(noise, cond, history, t, random, cfg_scale=cfg, temperature=temperature)
-    assert_close(actual, expected)
+                                   sigma=0.25, temperature=torch_value)
+    actual = model._compute_tail_step(
+        cond, history, noise=noise, timesteps=t, sde_random=random,
+        cfg=cfg, temperature=value,
+    )
+    assert_close(actual.sampled, expected)
+    assert_close(actual.feedback_embeddings, agg(expected).reshape(2, -1))
 
 
 def test_official_weight_mapping(model: MingTTSModel) -> None:

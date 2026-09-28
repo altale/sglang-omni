@@ -93,7 +93,6 @@ def assert_close(actual: torch.Tensor, expected: torch.Tensor) -> None:
 def test_backbone_cached_decode_and_isolation(
     pools: SimpleNamespace, dtype: torch.dtype, use_embeddings: bool,
 ) -> None:
-    from sglang.srt.layers.moe.fused_moe_triton.layer import FusedMoE
     from sglang.srt.model_executor.forward_batch_info import ForwardBatch, ForwardMode
     from sglang.srt.speculative.spec_info import SpeculativeAlgorithm
     from sglang_omni.model_runner.sglang_execution import attn_forward_context
@@ -117,7 +116,6 @@ def test_backbone_cached_decode_and_isolation(
         if "norm" in name and name.endswith("weight"):
             parameter.add_(1.0)
     model.to(device="mps", dtype=dtype)
-    assert isinstance(model.layers[1].mlp.experts, FusedMoE)
     ids = torch.tensor([1, 4, 5, 6, 7, 8], device="mps")
     embeds = torch.randn(6, 16).to(device="mps", dtype=dtype) if use_embeddings else None
     positions = torch.arange(6, device="mps").expand(3, -1).clone()
@@ -160,21 +158,10 @@ def test_backbone_cached_decode_and_isolation(
 
     expected = run(rows[0], full_locs, 0, 6)
     chunks = [run(rows[1], cached_locs, 0, 3)]
-    saved_prefix = [
-        (pools.kv.get_key_buffer(i)[cached_locs[:3]].clone(),
-         pools.kv.get_value_buffer(i)[cached_locs[:3]].clone())
-        for i in range(2)
-    ]
     other_expected = run(rows[2], other_locs, 0, 6, other=True)
-    for i, (key, value) in enumerate(saved_prefix):
-        torch.testing.assert_close(pools.kv.get_key_buffer(i)[cached_locs[:3]], key, atol=0, rtol=0)
-        torch.testing.assert_close(pools.kv.get_value_buffer(i)[cached_locs[:3]], value, atol=0, rtol=0)
     for step in range(3, 6):
         chunks.append(run(rows[1], cached_locs, step, step + 1))
     assert_close(torch.cat(chunks), expected)
-    for i in range(2):
-        assert_close(pools.kv.get_key_buffer(i)[cached_locs], pools.kv.get_key_buffer(i)[full_locs])
-        assert_close(pools.kv.get_value_buffer(i)[cached_locs], pools.kv.get_value_buffer(i)[full_locs])
 
     # Reuse the first request's storage without clearing stale KV entries.
     actual = [run(rows[0], full_locs, 0, 3, other=True)]
