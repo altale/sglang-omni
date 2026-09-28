@@ -61,7 +61,7 @@ class MingTtsMlxEngineBuilder(MingTtsEngineBuilder):
     ) -> None:
         from sglang_omni.models.ming_tts.tokenizer import load_ming_tts_tokenizer
 
-        self._model_worker = model_worker
+        self.model_worker = model_worker
         self.tokenizer = load_ming_tts_tokenizer(
             checkpoint_dir, llm_config=self.config.llm_config
         )
@@ -72,11 +72,11 @@ class MingTtsMlxEngineBuilder(MingTtsEngineBuilder):
     def make_model_runner(self, model_worker: Any, output_proc: Any) -> Any:
         from .mlx.worker import MingTTSMlxModelRunner
 
-        self._model_runner = MingTTSMlxModelRunner(model_worker, output_proc)
-        return self._model_runner
+        self.model_runner = MingTTSMlxModelRunner(model_worker, output_proc)
+        return self.model_runner
 
     def make_adapters(self, model: Any) -> tuple[Any, Any]:
-        return super().make_adapters(self._model_worker._mlx_runner.model)
+        return super().make_adapters(self.model_worker._mlx_runner.model)
 
 
 class MingTtsTorchMpsEngineBuilder(MingTtsEngineBuilder):

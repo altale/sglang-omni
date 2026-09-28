@@ -36,9 +36,9 @@ class MingTTSMlxReferenceEncoder(MingTTSReferenceEncoder):
         self.speaker_encoder = speaker_encoder
         self.device = torch.device("cpu")
         self.dtype = torch.float32
-        self._service = None
+        self.service = None
         if cache_model_identity is not None:
-            self._service = ReferenceEncodeService(
+            self.service = ReferenceEncodeService(
                 MingTTSReferenceEncodeHook(self, model_identity=cache_model_identity + ":mlx"),
                 max_items=cache_max_items, max_bytes=cache_max_bytes,
                 log_prefix="Ming MLX ref cache",

@@ -142,7 +142,7 @@ def test_preprocessing_rejects_streaming_before_work(
     scheduler = stages.create_preprocessing_executor("unused", context_length=64)
     payload = SimpleNamespace(request=SimpleNamespace(params={"stream": True}))
     with pytest.raises(ValueError, match="non-streaming"):
-        scheduler._fn(payload)
+        scheduler.fn(payload)
 
 
 def test_audio_factory_uses_nonstream_decoder(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -164,9 +164,9 @@ def test_audio_factory_uses_nonstream_decoder(monkeypatch: pytest.MonkeyPatch) -
     vae = object()
     monkeypatch.setattr(stages, "load_ming_tts_audio_vae", lambda *a, **kw: vae)
     scheduler = stages.create_audio_decode_executor("unused")
-    decoder = scheduler._fn.keywords["decoder"]
+    decoder = scheduler.fn.keywords["decoder"]
     assert isinstance(decoder, MingTorchAudioDecoder)
-    assert decoder._audio_vae is vae
+    assert decoder.audio_vae is vae
 
 
 @pytest.mark.skipif(not torch.backends.mps.is_available(), reason="Requires Apple Metal")
