@@ -113,7 +113,7 @@ def create_preprocessing_executor(
     max_decode_steps_cap: int | None = None,
     max_concurrency: int = 1,
 ) -> SimpleScheduler:
-    from sglang_omni.models.ming_tts.apple_runtime import ming_tts_uses_mlx
+    from sglang_omni.models.ming_tts.engine_builder import ming_tts_uses_mlx
     from sglang_omni.platforms import current_platform
 
     nonstream_only = current_platform.is_mps() and not ming_tts_uses_mlx()
@@ -153,13 +153,7 @@ def create_sglang_tts_engine_executor(
     tp_size: int = 1,
     nccl_port: int | None = None,
 ) -> Any:
-    from sglang_omni.models.ming_tts.apple_runtime import (
-        MingTtsMlxEngineBuilder,
-        MingTtsTorchMpsEngineBuilder,
-        ming_tts_uses_mlx,
-    )
     from sglang_omni.models.ming_tts.engine_builder import MingTtsEngineBuilder
-    from sglang_omni.platforms import current_platform
 
     user_overrides = dict(server_args_overrides or {})
     if "tp_size" in user_overrides and int(user_overrides["tp_size"]) != int(tp_size):
@@ -171,13 +165,7 @@ def create_sglang_tts_engine_executor(
         pass
     context_length = int(user_overrides.pop("context_length", context_length or 0) or 0)
 
-    if ming_tts_uses_mlx():
-        builder_class = MingTtsMlxEngineBuilder
-    elif current_platform.is_mps():
-        builder_class = MingTtsTorchMpsEngineBuilder
-    else:
-        builder_class = MingTtsEngineBuilder
-    return builder_class(
+    return MingTtsEngineBuilder(
         context_length=context_length or None,
         total_gpu_memory_fraction=total_gpu_memory_fraction,
         tp_rank=tp_rank,
@@ -212,7 +200,7 @@ def create_reference_encode_executor(
         MingSpeakerEmbeddingExtractor,
         MingTTSReferenceEncoder,
     )
-    from sglang_omni.models.ming_tts.apple_runtime import ming_tts_uses_mlx
+    from sglang_omni.models.ming_tts.engine_builder import ming_tts_uses_mlx
     from sglang_omni.utils.device import resolve_concrete_device
 
     use_mlx = ming_tts_uses_mlx()
@@ -321,7 +309,7 @@ def create_audio_decode_executor(
     else:
         pass
 
-    from sglang_omni.models.ming_tts.apple_runtime import ming_tts_uses_mlx
+    from sglang_omni.models.ming_tts.engine_builder import ming_tts_uses_mlx
 
     if ming_tts_uses_mlx():
         if streaming_cuda_graph or stream_slots != 1:

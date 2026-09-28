@@ -90,8 +90,8 @@ def patch_audio_decode_factory_dependencies(
     import torch
 
     from sglang_omni.models.ming_tts import (
-        apple_runtime,
         audio_decode,
+        engine_builder,
         stages,
         streaming_vocoder,
     )
@@ -124,7 +124,7 @@ def patch_audio_decode_factory_dependencies(
         def stop(self) -> None:
             self.stop_calls += 1
 
-    monkeypatch.setattr(apple_runtime, "ming_tts_uses_mlx", lambda: False)
+    monkeypatch.setattr(engine_builder, "ming_tts_uses_mlx", lambda: False)
     monkeypatch.setattr(torch.cuda, "is_available", lambda: True)
     monkeypatch.setattr(torch.cuda, "device_count", lambda: 1)
     monkeypatch.setattr(torch.cuda, "current_device", lambda: 0)

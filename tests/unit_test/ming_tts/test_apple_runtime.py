@@ -8,20 +8,25 @@ from typing import Any
 import pytest
 import torch
 
-from sglang_omni.models.ming_tts import apple_runtime, stages
-from sglang_omni.models.ming_tts.apple_runtime import (
-    MingTtsMlxEngineBuilder,
-    MingTtsTorchMpsEngineBuilder,
+from sglang_omni.models.ming_tts import engine_builder, stages
+from sglang_omni.models.ming_tts.engine_builder import (
+    MingTtsEngineBuilder,
     ming_tts_uses_mlx,
 )
-from sglang_omni.models.ming_tts.engine_builder import MingTtsEngineBuilder
 
 
 @pytest.fixture(
-    params=[MingTtsMlxEngineBuilder, MingTtsTorchMpsEngineBuilder],
+    params=[True, False],
     ids=["mlx", "torch_mps"],
 )
-def builder_type(request: pytest.FixtureRequest) -> type[MingTtsEngineBuilder]:
+def mlx_backend(
+    request: pytest.FixtureRequest,
+    monkeypatch: pytest.MonkeyPatch,
+) -> bool:
+    from sglang_omni.platforms import current_platform
+
+    monkeypatch.setattr(engine_builder, "ming_tts_uses_mlx", lambda: request.param)
+    monkeypatch.setattr(current_platform, "is_mps", lambda: True)
     return request.param
 
 
@@ -43,8 +48,8 @@ def test_backend_selection(
         assert ming_tts_uses_mlx() is expected
 
 
-def test_builder_defaults(builder_type: type[MingTtsEngineBuilder]) -> None:
-    builder = builder_type()
+def test_builder_defaults(mlx_backend: bool) -> None:
+    builder = MingTtsEngineBuilder()
     builder.context_length = 2048
     defaults = builder.generation_defaults(dtype="bfloat16")
     builder.adjust_overrides(defaults)
@@ -52,8 +57,11 @@ def test_builder_defaults(builder_type: type[MingTtsEngineBuilder]) -> None:
     assert defaults["max_total_tokens"] == 2048
     assert defaults["attention_backend"] == "torch_native"
     assert defaults["chunked_prefill_size"] == 0
-    if isinstance(builder, MingTtsMlxEngineBuilder):
+    if mlx_backend:
         assert builder.get_model_buffer_bs(None) is None
+    else:
+        model = SimpleNamespace(decode_input_embedding=SimpleNamespace(num_embeddings=1))
+        assert builder.get_model_buffer_bs(model) == 1
 
 
 @pytest.mark.parametrize("key,value", [
@@ -63,10 +71,9 @@ def test_builder_defaults(builder_type: type[MingTtsEngineBuilder]) -> None:
     ("prefill_attention_backend", "triton"),
     ("decode_attention_backend", "triton"), ("speculative_algorithm", "EAGLE"),
 ])
-def test_builder_rejects_unsupported_execution(
-    builder_type: type[MingTtsEngineBuilder], key: str, value: Any
-) -> None:
-    builder = builder_type()
+@pytest.mark.usefixtures("mlx_backend")
+def test_builder_rejects_unsupported_execution(key: str, value: Any) -> None:
+    builder = MingTtsEngineBuilder()
     builder.context_length = 2048
     overrides = builder.generation_defaults(dtype="bfloat16")
     overrides[key] = value
@@ -74,29 +81,24 @@ def test_builder_rejects_unsupported_execution(
         builder.adjust_overrides(overrides)
 
 
-def test_builder_rejects_tp(builder_type: type[MingTtsEngineBuilder]) -> None:
-    builder = builder_type(tp_size=2, nccl_port=12345)
+@pytest.mark.usefixtures("mlx_backend")
+def test_builder_rejects_tp() -> None:
+    builder = MingTtsEngineBuilder(tp_size=2, nccl_port=12345)
     builder.context_length = 2048
     with pytest.raises(ValueError, match="TP=1"):
         builder.adjust_overrides(builder.generation_defaults(dtype="bfloat16"))
 
 
 def test_engine_stage_dispatches_without_loading(
-    monkeypatch: pytest.MonkeyPatch, builder_type: type[MingTtsEngineBuilder],
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from sglang_omni.platforms import current_platform
-
-    monkeypatch.setattr(
-        apple_runtime, "ming_tts_uses_mlx", lambda: builder_type is MingTtsMlxEngineBuilder
-    )
-    monkeypatch.setattr(current_platform, "is_mps", lambda: True)
     calls: list[tuple[str, int | None, dict[str, Any]]] = []
 
     def build(self: Any, model_path: str, **kwargs: Any) -> str:
         calls.append((model_path, self.requested_context_length, kwargs))
         return "scheduler"
 
-    monkeypatch.setattr(builder_type, "build", build)
+    monkeypatch.setattr(MingTtsEngineBuilder, "build", build)
     assert stages.create_sglang_tts_engine_executor("local-model", context_length=2048) == "scheduler"
     assert calls[0][:2] == ("local-model", 2048)
 
@@ -104,7 +106,7 @@ def test_engine_stage_dispatches_without_loading(
 def test_audio_stage_dispatches_without_importing_torch_model(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr(apple_runtime, "ming_tts_uses_mlx", lambda: True)
+    monkeypatch.setattr(engine_builder, "ming_tts_uses_mlx", lambda: True)
     calls = []
 
     def create(model_path: str, **kwargs: Any) -> str:
@@ -118,13 +120,16 @@ def test_audio_stage_dispatches_without_importing_torch_model(
         stages.create_audio_decode_executor("local-model", streaming_cuda_graph=True)
 
 
-def test_mps_builder_rejects_quantization() -> None:
-    builder = MingTtsTorchMpsEngineBuilder()
+def test_builder_quantization(mlx_backend: bool) -> None:
+    builder = MingTtsEngineBuilder()
     builder.context_length = 64
     overrides = builder.generation_defaults(dtype="bfloat16")
     overrides["quantization"] = "mlx_q4"
-    with pytest.raises(ValueError, match="does not support quantization"):
+    if mlx_backend:
         builder.adjust_overrides(overrides)
+    else:
+        with pytest.raises(ValueError, match="does not support quantization"):
+            builder.adjust_overrides(overrides)
 
 
 def test_preprocessing_rejects_streaming_before_work(
@@ -133,7 +138,7 @@ def test_preprocessing_rejects_streaming_before_work(
     from sglang_omni.platforms import current_platform
 
     monkeypatch.setattr(current_platform, "is_mps", lambda: True)
-    monkeypatch.setattr(apple_runtime, "ming_tts_uses_mlx", lambda: False)
+    monkeypatch.setattr(engine_builder, "ming_tts_uses_mlx", lambda: False)
     monkeypatch.setattr(stages, "_resolve_checkpoint", lambda _: "unused")
     monkeypatch.setattr(
         stages, "load_ming_tts_config", lambda _: SimpleNamespace(llm_config=None)
@@ -149,7 +154,7 @@ def test_audio_factory_uses_nonstream_decoder(monkeypatch: pytest.MonkeyPatch) -
     from sglang_omni.models.ming_tts.audio_decode import MingTorchAudioDecoder
     from sglang_omni.utils import device
 
-    monkeypatch.setattr(apple_runtime, "ming_tts_uses_mlx", lambda: False)
+    monkeypatch.setattr(engine_builder, "ming_tts_uses_mlx", lambda: False)
     monkeypatch.setattr(
         device, "resolve_concrete_device", lambda *a: torch.device("mps")
     )

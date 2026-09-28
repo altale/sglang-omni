@@ -11,12 +11,12 @@ from sglang_omni.models.ming_tts.model_runner import MingTTSModelRunner
 
 
 def adjust_overrides(key: str, value: Any) -> dict[str, Any]:
+    builder = MingTtsEngineBuilder()
     overrides: dict[str, Any] = {
-        "disable_overlap_schedule": True,
-        "disable_radix_cache": True,
+        **builder.generation_defaults(dtype="bfloat16"),
         key: value,
     }
-    MingTtsEngineBuilder().adjust_overrides(overrides)
+    builder.adjust_overrides(overrides)
     return overrides
 
 
