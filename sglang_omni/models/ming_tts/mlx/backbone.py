@@ -11,27 +11,26 @@ from mlx_lm.models.base import create_attention_mask, scaled_dot_product_attenti
 from mlx_lm.models.cache import KVCache
 from mlx_lm.models.switch_layers import SwitchGLU
 
-from .config import TextConfig
+from sglang_omni.models.ming_tts.mlx.config import TextConfig
 
 
 class MRotaryEmbedding(nn.Module):
     def __init__(self, config: TextConfig) -> None:
         super().__init__()
-        self._sections = config.mrope_section
-        self._inv_freq = 1.0 / (
+        self.sections = config.mrope_section
+        self._inv_freq = 1.0 / (  # noqa: leading-underscore - Exclude the buffer from MLX parameters.
             config.rope_theta
             ** (mx.arange(0, config.head_dim, 2, dtype=mx.float32) / config.head_dim)
         )
-        # Private arrays are excluded from parameters(); finish before thread handoff.
-        mx.eval(self._inv_freq)
+        # Note (altale): Private buffers need evaluation before the thread handoff.
+        mx.eval(self._inv_freq)  # noqa: leading-underscore - MLX buffer.
 
     def __call__(self, x: mx.array, positions: mx.array) -> mx.array:
-        # positions: [3, batch, sequence]; x: [batch, heads, sequence, dim].
-        phases = positions[..., None].astype(mx.float32) * self._inv_freq
+        phases = positions[..., None].astype(mx.float32) * self._inv_freq  # noqa: leading-underscore - MLX buffer.
         parts = []
         start = 0
-        for axis, width in enumerate(self._sections):
-            parts.append(phases[axis, ..., start:start + width])
+        for axis, width in enumerate(self.sections):
+            parts.append(phases[axis, ..., start : start + width])
             start += width
         phase = mx.concatenate(parts, axis=-1)[:, None]
         left, right = mx.split(x.astype(mx.float32), 2, axis=-1)
@@ -67,15 +66,21 @@ class BailingMoeAttention(nn.Module):
         batch, length, _ = x.shape
         q_size = self.num_heads * self.head_dim
         kv_size = self.num_kv_heads * self.head_dim
-        q, k, v = mx.split(
-            self.query_key_value(x), (q_size, q_size + kv_size), axis=-1
+        q, k, v = mx.split(self.query_key_value(x), (q_size, q_size + kv_size), axis=-1)
+        q = q.reshape(batch, length, self.num_heads, self.head_dim).transpose(
+            0, 2, 1, 3
         )
-        q = q.reshape(batch, length, self.num_heads, self.head_dim).transpose(0, 2, 1, 3)
-        k = k.reshape(batch, length, self.num_kv_heads, self.head_dim).transpose(0, 2, 1, 3)
-        v = v.reshape(batch, length, self.num_kv_heads, self.head_dim).transpose(0, 2, 1, 3)
+        k = k.reshape(batch, length, self.num_kv_heads, self.head_dim).transpose(
+            0, 2, 1, 3
+        )
+        v = v.reshape(batch, length, self.num_kv_heads, self.head_dim).transpose(
+            0, 2, 1, 3
+        )
         q, k = self.rotary_emb(q, positions), self.rotary_emb(k, positions)
         if cache is not None:
             k, v = cache.update_and_fetch(k, v)
+        else:
+            pass
         out = scaled_dot_product_attention(
             q, k, v, cache=cache, scale=self.head_dim**-0.5, mask=mask
         )
@@ -101,9 +106,15 @@ class BailingMoeSparseMoeBlock(nn.Module):
         self.routed_scaling_factor = config.routed_scaling_factor
         self.gate = nn.Linear(config.hidden_size, config.num_experts, bias=False)
         if config.multi_gate:
-            # Loaded for coverage; Ming TTS does not pass modality routing masks.
-            self.image_gate = nn.Linear(config.hidden_size, config.num_experts, bias=False)
-            self.audio_gate = nn.Linear(config.hidden_size, config.num_experts, bias=False)
+            # Keep checkpoint gates even though TTS uses no modality masks.
+            self.image_gate = nn.Linear(
+                config.hidden_size, config.num_experts, bias=False
+            )
+            self.audio_gate = nn.Linear(
+                config.hidden_size, config.num_experts, bias=False
+            )
+        else:
+            pass
         self.experts = SwitchGLU(
             config.hidden_size, config.moe_intermediate_size, config.num_experts
         )
@@ -112,19 +123,21 @@ class BailingMoeSparseMoeBlock(nn.Module):
                 config.hidden_size,
                 config.moe_intermediate_size * config.num_shared_experts,
             )
-            if config.num_shared_experts else None
+            if config.num_shared_experts
+            else None
         )
 
     def route(self, x: mx.array) -> tuple[mx.array, mx.array]:
-        # Keep the router linear in weight dtype, then softmax in FP32 like Omni.
         logits = self.gate(x.astype(self.gate.weight.dtype)).astype(x.dtype)
         scores = mx.softmax(logits.astype(mx.float32), axis=-1)
         indices = mx.argpartition(-scores, kth=self.top_k - 1, axis=-1)[
-            ..., :self.top_k
+            ..., : self.top_k
         ]
         weights = mx.take_along_axis(scores, indices, axis=-1)
         if self.norm_topk_prob:
             weights = weights / weights.sum(axis=-1, keepdims=True)
+        else:
+            pass
         return indices, weights * self.routed_scaling_factor
 
     def __call__(self, x: mx.array) -> mx.array:
@@ -134,6 +147,8 @@ class BailingMoeSparseMoeBlock(nn.Module):
         out = out.astype(x.dtype)
         if self.shared_experts is not None:
             out = out + self.shared_experts(x)
+        else:
+            pass
         return out
 
 
@@ -182,6 +197,8 @@ class BailingMoeTextModel(nn.Module):
         x = self.word_embeddings(input_ids) if inputs_embeds is None else inputs_embeds
         if cache is None:
             cache = [None] * len(self.layers)
+        else:
+            pass
         if positions is None:
             offset = cache[0].offset if cache[0] is not None else 0
             positions = mx.broadcast_to(
@@ -190,6 +207,8 @@ class BailingMoeTextModel(nn.Module):
             )
         elif positions.shape != (3, x.shape[0], x.shape[1]):
             raise ValueError("positions must have shape [3, batch, sequence]")
+        else:
+            pass
         mask = create_attention_mask(x, cache[0])
         for layer, layer_cache in zip(self.layers, cache, strict=True):
             x = layer(x, positions, mask, layer_cache)

@@ -3,17 +3,22 @@
 
 from __future__ import annotations
 
-from typing import Any
-
 import mlx.core as mx
 import numpy as np
 import torch
+from sglang.srt.hardware_backend.mlx.kv_cache import ContiguousAttentionKVCache
+from sglang.srt.hardware_backend.mlx.remote_code_gate import resolve_model_directory
+from sglang.srt.hardware_backend.mlx.tp_worker import MlxTpModelWorker
+from sglang.srt.managers.schedule_batch import ScheduleBatch
+from sglang.srt.managers.utils import GenerationBatchResult
+from sglang.srt.model_executor.forward_batch_info import ForwardBatch
 
 from sglang_omni.model_runner.mlx_model_worker import MlxSchedulerModelRunner
 from sglang_omni.models.ming_tts.engine_io import MingTTSLatentPatch
-
-from .loading import load_ming_tts_model
-from .runner import MingTTSMlxRunner
+from sglang_omni.models.ming_tts.mlx.loading import load_ming_tts_model
+from sglang_omni.models.ming_tts.mlx.runner import MingTTSMlxRunner
+from sglang_omni.scheduling.sglang_backend.output_processor import SGLangOutputProcessor
+from sglang_omni.scheduling.types import SchedulerRequest
 
 
 class MingTTSMlxBackend(MingTTSMlxRunner):
@@ -31,22 +36,18 @@ class MingTTSMlxBackend(MingTTSMlxRunner):
         deterministic_seeding: bool,
         pool_size: int | None = None,
     ) -> None:
-        from sglang.srt.hardware_backend.mlx.remote_code_gate import (
-            resolve_model_directory,
-        )
-
-        del trust_remote_code, mem_fraction_static, enable_sampling, deterministic_seeding
+        # Note (altale): Unused options are required by the shared MLX worker interface.
         if not disable_radix_cache:
             raise ValueError("Ming MLX requires disable_radix_cache=true")
+        else:
+            pass
         path = resolve_model_directory(model_path, revision=revision)
         model = load_ming_tts_model(path, quantization=quantization)
         self.pool_size = pool_size or model.config.llm_config.max_position_embeddings
         mx.random.seed(sampling_rng_seed)
-        super().__init__(model, cache_factory=self._make_cache)
+        super().__init__(model, cache_factory=self.make_cache)
 
-    def _make_cache(self) -> list[Any]:
-        from sglang.srt.hardware_backend.mlx.kv_cache import ContiguousAttentionKVCache
-
+    def make_cache(self) -> list[ContiguousAttentionKVCache]:
         return [
             ContiguousAttentionKVCache(max_seq_len=self.pool_size)
             for _ in self.model.model.layers
@@ -58,24 +59,31 @@ def to_mlx(value: torch.Tensor) -> mx.array:
 
 
 class MingTTSMlxModelRunner(MlxSchedulerModelRunner):
-    def __init__(self, tp_worker: Any, output_processor: Any) -> None:
+    def __init__(
+        self, tp_worker: MlxTpModelWorker, output_processor: SGLangOutputProcessor
+    ) -> None:
         super().__init__(tp_worker, output_processor)
-        self.backend: MingTTSMlxBackend = tp_worker._mlx_runner
-        self._generated: dict[str, list[torch.Tensor]] = {}
+        self.backend: MingTTSMlxBackend = tp_worker._mlx_runner  # noqa: leading-underscore - SGLang worker interface.
+        self.generated_latents: dict[str, list[torch.Tensor]] = {}
 
     def reset_request(self, request_id: str) -> None:
         with self.mlx_stream_context():
             self.backend.release(request_id)
-            self._generated.pop(request_id, None)
+            self.generated_latents.pop(request_id, None)
 
-    def lookahead_eligible(self, batch: Any) -> bool:
+    def lookahead_eligible(self, batch: ScheduleBatch) -> bool:
         return False
 
     def custom_prefill_forward(
-        self, forward_batch: Any, schedule_batch: Any, requests: list[Any]
-    ) -> Any:
+        self,
+        forward_batch: ForwardBatch | None,
+        schedule_batch: ScheduleBatch,
+        requests: list[SchedulerRequest],
+    ) -> GenerationBatchResult:
         if len(requests) != 1:
             raise ValueError("Ming MLX supports one active request")
+        else:
+            pass
         request = requests[0]
         data = request.data
         state = data.state
@@ -97,20 +105,23 @@ class MingTTSMlxModelRunner(MlxSchedulerModelRunner):
                 ),
                 speaker_positions=state.spk_injection_positions,
             )
-            self._generated[request.request_id] = []
-            return self._step(request)
+            self.generated_latents[request.request_id] = []
+            return self.step(request)
 
     def custom_decode_forward(
-        self, forward_batch: Any, schedule_batch: Any, requests: list[Any]
-    ) -> Any:
+        self,
+        forward_batch: ForwardBatch | None,
+        schedule_batch: ScheduleBatch,
+        requests: list[SchedulerRequest],
+    ) -> GenerationBatchResult:
         if len(requests) != 1:
             raise ValueError("Ming MLX supports one active request")
+        else:
+            pass
         with self.mlx_stream_context():
-            return self._step(requests[0])
+            return self.step(requests[0])
 
-    def _step(self, request: Any) -> Any:
-        from sglang.srt.managers.scheduler import GenerationBatchResult
-
+    def step(self, request: SchedulerRequest) -> GenerationBatchResult:
         data = request.data
         try:
             step = self.backend.step(
@@ -125,13 +136,17 @@ class MingTTSMlxModelRunner(MlxSchedulerModelRunner):
                     patch, is_last=step.finish_reason is not None
                 )
             else:
-                self._generated[request.request_id].append(patch)
+                self.generated_latents[request.request_id].append(patch)
                 if step.finish_reason is not None:
                     data.generated_latents = torch.stack(
-                        self._generated[request.request_id]
+                        self.generated_latents[request.request_id]
                     )
+                else:
+                    pass
             if step.finish_reason == "stop":
                 data.stop_step = data.generation_steps
+            else:
+                pass
             token = (
                 data.audio_eos_token_id
                 if step.finish_reason == "stop"

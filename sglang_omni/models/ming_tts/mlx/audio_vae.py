@@ -4,11 +4,13 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Literal
+from typing import Literal
 
 import mlx.core as mx
 import mlx.nn as nn
 from mlx_lm.models.qwen2 import ModelArgs, Qwen2Model
+from pydantic import JsonValue
+from transformers import Qwen2Config
 
 
 @dataclass
@@ -24,20 +26,20 @@ class AudioKVCache:
         if self.keys is not None:
             keys = mx.concatenate((self.keys, keys), axis=2)
             values = mx.concatenate((self.values, values), axis=2)
+        else:
+            pass
         self.keys, self.values = keys, values
         return keys, values
 
 
 class AudioQwen2Model(Qwen2Model):
-    def __init__(self, config: dict[str, Any]) -> None:
-        from transformers import Qwen2Config
-
+    def __init__(self, config: dict[str, JsonValue]) -> None:
         resolved = Qwen2Config(**config)
         args = resolved.to_dict()
         args["rope_theta"] = resolved.rope_parameters["rope_theta"]
         args["rope_scaling"] = resolved.rope_parameters
         super().__init__(ModelArgs.from_dict(args))
-        self._windows = [
+        self.windows = [
             resolved.sliding_window if kind == "sliding_attention" else None
             for kind in resolved.layer_types
         ]
@@ -52,13 +54,17 @@ class AudioQwen2Model(Qwen2Model):
             query = mx.arange(past, past + x.shape[1])[:, None]
             key = mx.arange(past + x.shape[1])[None, :]
             mask = query >= key
-            window = self._windows[index]
+            window = self.windows[index]
             if window is not None:
                 mask = mask & (query - key < window)
+            else:
+                pass
             x = layer(x, mask=mask, cache=entry)
             if entry is not None and window is not None:
                 entry.keys = entry.keys[:, :, -window:]
                 entry.values = entry.values[:, :, -window:]
+            else:
+                pass
         return self.norm(x)
 
     def make_cache(self) -> list[AudioKVCache]:
@@ -77,7 +83,9 @@ class StreamingLinearUpsample(nn.Module):
         self.scale_factor = scale_factor
 
     def interpolate(self, x: mx.array) -> mx.array:
-        positions = (mx.arange(x.shape[1] * self.scale_factor) + 0.5) / self.scale_factor - 0.5
+        positions = (
+            mx.arange(x.shape[1] * self.scale_factor) + 0.5
+        ) / self.scale_factor - 0.5
         positions = mx.clip(positions, 0, x.shape[1] - 1)
         left = mx.floor(positions).astype(mx.int32)
         right = mx.minimum(left + 1, x.shape[1] - 1)
@@ -90,18 +98,30 @@ class StreamingLinearUpsample(nn.Module):
         if state is None:
             if last_chunk:
                 return self.interpolate(x), None
+            else:
+                pass
             return None, UpsampleState(x)
+        else:
+            pass
         parts = [state.pending, x[:, :1]]
         start = 0
         if state.left is not None:
             parts.insert(0, state.left)
             start = self.scale_factor
+        else:
+            pass
         previous = self.interpolate(mx.concatenate(parts, axis=1))
-        previous = previous[:, start:start + state.pending.shape[1] * self.scale_factor]
+        previous = previous[
+            :, start : start + state.pending.shape[1] * self.scale_factor
+        ]
         left = state.pending[:, -1:]
         if last_chunk:
-            tail = self.interpolate(mx.concatenate((left, x), axis=1))[:, self.scale_factor:]
+            tail = self.interpolate(mx.concatenate((left, x), axis=1))[
+                :, self.scale_factor :
+            ]
             return mx.concatenate((previous, tail), axis=1), None
+        else:
+            pass
         return previous, UpsampleState(x, left)
 
 
@@ -124,7 +144,9 @@ class ISTFT(nn.Module):
         window = self.window.astype(mx.float32)
         inverse = mx.fft.irfft(spectrum, n=self.n_fft, axis=-1) * window
         size = (frames - 1) * self.hop_length + self.n_fft
-        indices = mx.arange(frames)[:, None] * self.hop_length + mx.arange(self.n_fft)[None]
+        indices = (
+            mx.arange(frames)[:, None] * self.hop_length + mx.arange(self.n_fft)[None]
+        )
         audio = mx.zeros((batch, size), dtype=mx.float32)
         audio = audio.at[:, indices.reshape(-1)].add(inverse.reshape(batch, -1))
         envelope = mx.zeros((1, size), dtype=mx.float32)
@@ -134,6 +156,8 @@ class ISTFT(nn.Module):
         pad = buffer_len // 2
         if not streaming:
             return audio[:, pad:-pad] / envelope[:, pad:-pad], None
+        else:
+            pass
         if overlap is None:
             audio, envelope = audio[:, pad:], envelope[:, pad:]
         else:
@@ -161,11 +185,13 @@ class ISTFTHead(nn.Module):
         mag, phase = mx.split(self.out(x).astype(mx.float32), 2, axis=-1)
         mag = mx.minimum(mx.exp(mag), 100)
         spectrum = mag * (mx.cos(phase) + 1j * mx.sin(phase))
-        return self.istft(spectrum, overlap=overlap, streaming=streaming, last_chunk=last_chunk)
+        return self.istft(
+            spectrum, overlap=overlap, streaming=streaming, last_chunk=last_chunk
+        )
 
 
 class Encoder(nn.Module):
-    def __init__(self, config: dict[str, Any], patch_size: int) -> None:
+    def __init__(self, config: dict[str, JsonValue], patch_size: int) -> None:
         super().__init__()
         backbone = config["backbone"]
         hidden = backbone["hidden_size"]
@@ -181,15 +207,21 @@ class Encoder(nn.Module):
             aggregator = dict(backbone, num_hidden_layers=4)
             if aggregator.get("layer_types") is not None:
                 aggregator["layer_types"] = aggregator["layer_types"][:4]
+            else:
+                pass
             self.aggregator = AudioQwen2Model(aggregator)
             self.cls_embed = mx.zeros((1, 1, hidden))
+        else:
+            pass
 
     def __call__(self, waveform: mx.array) -> mx.array:
         batch, length = waveform.shape
         count = (length + self.hop_size - 1) // self.hop_size
         needed = (count - 1) * self.hop_size + self.input_dim
         waveform = mx.pad(waveform, ((0, 0), (0, max(0, needed - length))))
-        indices = mx.arange(count)[:, None] * self.hop_size + mx.arange(self.input_dim)[None]
+        indices = (
+            mx.arange(count)[:, None] * self.hop_size + mx.arange(self.input_dim)[None]
+        )
         frames = waveform[:, indices]
         x = self.encoder(self.fc2(self.fc1(frames.astype(self.fc1.weight.dtype))))
         if self.patch_size != -1:
@@ -198,8 +230,14 @@ class Encoder(nn.Module):
             hidden = x.shape[-1]
             x = x.reshape(-1, self.patch_size, hidden)
             cls = mx.broadcast_to(self.cls_embed, (x.shape[0], 1, hidden))
-            x = mx.concatenate((x, cls.astype(x.dtype)), axis=1).reshape(batch, -1, hidden)
-            x = self.aggregator(x).reshape(batch, -1, self.patch_size + 1, hidden)[:, :, -1]
+            x = mx.concatenate((x, cls.astype(x.dtype)), axis=1).reshape(
+                batch, -1, hidden
+            )
+            x = self.aggregator(x).reshape(batch, -1, self.patch_size + 1, hidden)[
+                :, :, -1
+            ]
+        else:
+            pass
         return self.fc3(x)
 
 
@@ -211,7 +249,7 @@ class AudioDecoderState:
 
 
 class Decoder(nn.Module):
-    def __init__(self, config: dict[str, Any], patch_size: int) -> None:
+    def __init__(self, config: dict[str, JsonValue], patch_size: int) -> None:
         super().__init__()
         hidden = config["backbone"]["hidden_size"]
         self.decoder = AudioQwen2Model(config["backbone"])
@@ -220,39 +258,64 @@ class Decoder(nn.Module):
         self.patch_size = patch_size
         if patch_size != -1:
             self.upsampling = StreamingLinearUpsample(patch_size)
+        else:
+            pass
 
     def __call__(
-        self, latent: mx.array, *, state: AudioDecoderState | None = None,
-        streaming: bool = False, last_chunk: bool = True,
+        self,
+        latent: mx.array,
+        *,
+        state: AudioDecoderState | None = None,
+        streaming: bool = False,
+        last_chunk: bool = True,
     ) -> tuple[mx.array, AudioDecoderState | None]:
         if streaming and state is None:
             state = AudioDecoderState(self.decoder.make_cache())
+        else:
+            pass
         x = self.fc1(latent.astype(self.fc1.weight.dtype))
         if self.patch_size != -1:
             if streaming:
-                x, state.upsample = self.upsampling(x, state.upsample, last_chunk=last_chunk)
+                x, state.upsample = self.upsampling(
+                    x, state.upsample, last_chunk=last_chunk
+                )
                 if x is None:
                     return mx.zeros((latent.shape[0], 0)), state
+                else:
+                    pass
             else:
                 x = self.upsampling.interpolate(x)
+        else:
+            pass
         x = self.decoder(x, cache=state.cache if streaming else None)
         audio, overlap = self.head(
-            x, overlap=state.overlap if streaming else None,
-            streaming=streaming, last_chunk=last_chunk,
+            x,
+            overlap=state.overlap if streaming else None,
+            streaming=streaming,
+            last_chunk=last_chunk,
         )
         if streaming:
             state.overlap = overlap
+        else:
+            pass
         return audio, None if last_chunk else state
 
 
 class AudioVAE(nn.Module):
     def __init__(
-        self, config: dict[str, Any], *, component: Literal["encoder", "decoder"]
+        self, config: dict[str, JsonValue], *, component: Literal["encoder", "decoder"]
     ) -> None:
         super().__init__()
         self.config = config
-        if config["sample_rate"] != 44100 or config.get("semantic_module_kwargs") is not None:
-            raise ValueError("Ming AudioVAE requires 44.1 kHz audio without semantic modules")
+        if (
+            config["sample_rate"] != 44100
+            or config.get("semantic_module_kwargs") is not None
+        ):
+            raise ValueError(
+                "Ming AudioVAE requires 44.1 kHz audio without semantic modules"
+            )
+        else:
+            pass
         if component == "encoder":
             self.encoder = Encoder(config["enc_kwargs"], config["patch_size"])
         elif component == "decoder":
@@ -260,9 +323,13 @@ class AudioVAE(nn.Module):
         else:
             raise ValueError("AudioVAE component must be encoder or decoder")
 
-    def encode_latent(self, waveform: mx.array, *, noise: mx.array | None = None) -> mx.array:
+    def encode_latent(
+        self, waveform: mx.array, *, noise: mx.array | None = None
+    ) -> mx.array:
         mean, scale = mx.split(self.encoder(waveform), 2, axis=-1)
         std = nn.softplus(scale) + 1e-4
         if noise is None:
             noise = mx.random.normal(mean.shape, dtype=mean.dtype)
+        else:
+            pass
         return mean + std * noise

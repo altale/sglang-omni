@@ -211,6 +211,8 @@ class ISTFTHead(FourierHead):
         if x_pred.device.type == "mps":
             # Metal does not support the complex spectrum/FFT path.
             x_pred = x_pred.float().cpu()
+        else:
+            pass
         mag, phase = x_pred.chunk(2, dim=1)
         mag = torch.clip(torch.exp(mag), max=1e2)
         spectrum = mag * (torch.cos(phase) + 1j * torch.sin(phase))

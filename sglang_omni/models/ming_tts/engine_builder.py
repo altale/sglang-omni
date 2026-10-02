@@ -6,6 +6,7 @@ from __future__ import annotations
 import logging
 from typing import Any
 
+import sglang_omni.platforms as platforms
 from sglang_omni.models.ming_omni.tp_utils import validate_attention_tp_config
 from sglang_omni.scheduling.engine_factory import TtsEngineBuilder
 from sglang_omni.scheduling.generation_batch_policy import get_decode_cuda_graph_bs
@@ -16,10 +17,8 @@ logger = logging.getLogger(__name__)
 def ming_tts_uses_mlx() -> bool:
     from sglang.srt.hardware_backend.mlx.runtime import use_mlx
 
-    from sglang_omni.platforms import current_platform
-
     selected = use_mlx()
-    if selected and not current_platform.is_mps():
+    if selected and not platforms.current_platform.is_mps():
         raise ValueError("Ming native MLX requires Apple Silicon / Metal")
     else:
         return selected
@@ -135,8 +134,6 @@ class MingTtsEngineBuilder(TtsEngineBuilder):
         self.context_length = int(context_length)
 
     def generation_defaults(self, *, dtype: str) -> dict[str, Any]:
-        from sglang_omni.platforms import current_platform
-
         defaults = {
             "max_running_requests": 8,
             "dtype": dtype,
@@ -148,7 +145,7 @@ class MingTtsEngineBuilder(TtsEngineBuilder):
             "sampling_backend": "pytorch",
             "trust_remote_code": False,
         }
-        if ming_tts_uses_mlx() or current_platform.is_mps():
+        if ming_tts_uses_mlx() or platforms.current_platform.is_mps():
             defaults.update(
                 max_running_requests=1,
                 max_total_tokens=self.context_length,
@@ -160,8 +157,6 @@ class MingTtsEngineBuilder(TtsEngineBuilder):
         return defaults
 
     def adjust_overrides(self, overrides: dict[str, Any]) -> None:
-        from sglang_omni.platforms import current_platform
-
         overrides.pop("context_length", None)
         overrides["tp_size"] = self.tp_size
 
@@ -201,7 +196,7 @@ class MingTtsEngineBuilder(TtsEngineBuilder):
             pass
 
         use_mlx = ming_tts_uses_mlx()
-        if not use_mlx and not current_platform.is_mps():
+        if not use_mlx and not platforms.current_platform.is_mps():
             return
         else:
             pass
@@ -330,7 +325,7 @@ class MingTtsEngineBuilder(TtsEngineBuilder):
         )
 
         if ming_tts_uses_mlx():
-            model = self.model_worker._mlx_runner.model
+            model = self.model_worker._mlx_runner.model  # noqa: leading-underscore - SGLang worker interface.
         else:
             pass
         return make_ming_tts_scheduler_adapters(

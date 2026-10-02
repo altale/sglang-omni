@@ -8,7 +8,7 @@ import math
 import mlx.core as mx
 import mlx.nn as nn
 
-from .config import AcousticConfig
+from sglang_omni.models.ming_tts.mlx.config import AcousticConfig
 
 
 def rotary_frequencies(length: int, head_dim: int) -> tuple[mx.array, mx.array]:
@@ -23,9 +23,11 @@ def apply_rotary(x: mx.array, rope: tuple[mx.array, mx.array]) -> mx.array:
     cos, sin = rope
     even = x[..., 0::2].astype(mx.float32)
     odd = x[..., 1::2].astype(mx.float32)
-    return mx.stack(
-        (even * cos - odd * sin, odd * cos + even * sin), axis=-1
-    ).reshape(x.shape).astype(x.dtype)
+    return (
+        mx.stack((even * cos - odd * sin, odd * cos + even * sin), axis=-1)
+        .reshape(x.shape)
+        .astype(x.dtype)
+    )
 
 
 class Attention(nn.Module):
@@ -41,13 +43,13 @@ class Attention(nn.Module):
     def __call__(self, x: mx.array, rope: tuple[mx.array, mx.array]) -> mx.array:
         batch, length, dim = x.shape
         q, k, v = [
-            proj(x).reshape(batch, length, self.heads, self.head_dim).transpose(0, 2, 1, 3)
+            proj(x)
+            .reshape(batch, length, self.heads, self.head_dim)
+            .transpose(0, 2, 1, 3)
             for proj in (self.to_q, self.to_k, self.to_v)
         ]
         q, k = apply_rotary(q, rope), apply_rotary(k, rope)
-        out = mx.fast.scaled_dot_product_attention(
-            q, k, v, scale=self.head_dim**-0.5
-        )
+        out = mx.fast.scaled_dot_product_attention(q, k, v, scale=self.head_dim**-0.5)
         return self.to_out[0](out.transpose(0, 2, 1, 3).reshape(batch, length, dim))
 
 
@@ -88,14 +90,14 @@ class TimestepEmbedder(nn.Module):
     def __init__(self, dim: int) -> None:
         super().__init__()
         self.time_mlp = [nn.Linear(256, dim), nn.SiLU(), nn.Linear(dim, dim)]
-        self._freqs = mx.exp(
+        self._freqs = mx.exp(  # noqa: leading-underscore - Exclude the buffer from MLX parameters.
             mx.arange(128, dtype=mx.float32) * (-math.log(10000) / 127)
         )
-        # Private arrays are excluded from parameters(); finish before thread handoff.
-        mx.eval(self._freqs)
+        # Note (altale): Private buffers need evaluation before the thread handoff.
+        mx.eval(self._freqs)  # noqa: leading-underscore - MLX buffer.
 
     def __call__(self, t: mx.array) -> mx.array:
-        phase = 1000 * t[:, None].astype(mx.float32) * self._freqs
+        phase = 1000 * t[:, None].astype(mx.float32) * self._freqs  # noqa: leading-underscore - MLX buffer.
         x = mx.concatenate((mx.sin(phase), mx.cos(phase)), axis=-1)
         x = x.astype(self.time_mlp[0].weight.dtype)
         for layer in self.time_mlp:

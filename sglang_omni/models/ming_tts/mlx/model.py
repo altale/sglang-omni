@@ -10,10 +10,10 @@ import mlx.core as mx
 import mlx.nn as nn
 from mlx_lm.models.cache import KVCache
 
-from .acoustic import Aggregator
-from .backbone import BailingMoeTextModel
-from .config import AcousticConfig, ModelConfig
-from .flow_matching import FlowLoss
+from sglang_omni.models.ming_tts.mlx.acoustic import Aggregator
+from sglang_omni.models.ming_tts.mlx.backbone import BailingMoeTextModel
+from sglang_omni.models.ming_tts.mlx.config import AcousticConfig, ModelConfig
+from sglang_omni.models.ming_tts.mlx.flow_matching import FlowLoss
 
 
 @dataclass
@@ -30,11 +30,13 @@ class MingTTSModel(nn.Module):
         self.model = BailingMoeTextModel(config.llm_config)
         self.linear_proj_audio = Aggregator(
             AcousticConfig.from_dict(config.aggregator_config),
-            config.latent_dim, config.llm_config.hidden_size,
+            config.latent_dim,
+            config.llm_config.hidden_size,
         )
         self.flowloss = FlowLoss(
             AcousticConfig.from_dict(config.ditar_config),
-            config.latent_dim, config.llm_config.hidden_size,
+            config.latent_dim,
+            config.llm_config.hidden_size,
         )
         self.stop_head = nn.Linear(config.llm_config.hidden_size, 2)
         self.spk_head = nn.Linear(192, config.llm_config.hidden_size)
@@ -72,7 +74,7 @@ class MingTTSModel(nn.Module):
             -1, self.config.llm_config.hidden_size
         )
 
-    def _compute_tail_step(
+    def compute_tail_step(
         self,
         hidden_states: mx.array,
         latent_history: mx.array,
@@ -85,8 +87,14 @@ class MingTTSModel(nn.Module):
         temperature: float | mx.array = 0.0,
     ) -> MingTTSTailOutputs:
         sampled = self.flowloss.sample(
-            hidden_states, latent_history, noise, timesteps, sde_random,
-            cfg=cfg, sigma=sigma, temperature=temperature,
+            hidden_states,
+            latent_history,
+            noise,
+            timesteps,
+            sde_random,
+            cfg=cfg,
+            sigma=sigma,
+            temperature=temperature,
         )
         feedback = self.linear_proj_audio(sampled).reshape(
             int(hidden_states.shape[0]),
@@ -102,31 +110,49 @@ class MingTTSModel(nn.Module):
         for key, value in weights.items():
             if key.startswith(("audio.", "model.lm_head.")):
                 continue
+            else:
+                pass
             if key.endswith(".rotary_emb.inv_freq") or key in (
                 "linear_proj_audio.rotary_embed.inv_freq",
                 "flowloss.cfm.model.rotary_embed.inv_freq",
             ):
                 continue
+            else:
+                pass
             if key.startswith("model.model."):
-                key = key[len("model."):]
+                key = key[len("model.") :]
+            else:
+                pass
             key = key.replace(".mlp.ff.0.0.", ".mlp.fc1.")
             key = key.replace(".mlp.ff.2.", ".mlp.fc2.")
             if key in mapped:
                 raise ValueError(f"Duplicate checkpoint mapping: {key}")
+            else:
+                pass
             mapped[key] = value
         for i in range(len(self.model.layers)):
             if i < self.config.llm_config.first_k_dense_replace:
                 continue
+            else:
+                pass
             prefix = f"model.layers.{i}.mlp.experts"
             for proj in ("gate_proj", "up_proj", "down_proj"):
                 first = f"{prefix}.0.{proj}.weight"
                 if first not in mapped:
                     continue
+                else:
+                    pass
                 target = f"{prefix}.{proj}.weight"
                 if target in mapped:
-                    raise ValueError(f"Both stacked and individual expert weights: {target}")
-                mapped[target] = mx.stack([
-                    mapped.pop(f"{prefix}.{e}.{proj}.weight")
-                    for e in range(self.config.llm_config.num_experts)
-                ])
+                    raise ValueError(
+                        f"Both stacked and individual expert weights: {target}"
+                    )
+                else:
+                    pass
+                mapped[target] = mx.stack(
+                    [
+                        mapped.pop(f"{prefix}.{e}.{proj}.weight")
+                        for e in range(self.config.llm_config.num_experts)
+                    ]
+                )
         return mapped
