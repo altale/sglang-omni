@@ -123,7 +123,9 @@ def create_preprocessing_executor(
     max_decode_steps_cap: int | None = None,
     max_concurrency: int = 1,
 ) -> SimpleScheduler[StagePayload, StagePayload]:
-    nonstream_only = current_platform.is_mps() and not engine_builder.ming_tts_uses_mlx()
+    nonstream_only = (
+        current_platform.is_mps() and not engine_builder.ming_tts_uses_mlx()
+    )
     checkpoint_dir = _resolve_checkpoint(model_path)
     config = load_ming_tts_config(checkpoint_dir)
     context_length = int(context_length or resolve_context_length(config))
@@ -272,6 +274,7 @@ def create_mlx_audio_decode_executor(
     from sglang_omni.models.ming_tts.mlx.audio_io import MingMlxAudioDecoder
     from sglang_omni.models.ming_tts.mlx.config import ModelConfig
     from sglang_omni.models.ming_tts.mlx.loading import load_ming_audio_vae, read_config
+
     path = _resolve_checkpoint(model_path)
     config = ModelConfig.from_dict(read_config(path))
     decoder = MingMlxAudioDecoder(load_ming_audio_vae(path, component="decoder"))

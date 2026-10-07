@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
+from functools import cached_property
 
 import mlx.core as mx
 import numpy as np
@@ -48,10 +49,14 @@ class MingTTSMlxReferenceEncoder(MingTTSReferenceEncoder):
         else:
             pass
 
+    @cached_property
+    def stream(self) -> mx.Stream:
+        return mx.new_thread_local_stream(mx.gpu)
+
     def encode_reference(self, ref_audio: str) -> dict[str, torch.Tensor | int]:
         waveform, speaker_waveform = self.load_reference_waveform(ref_audio)
         waveform = self.pad_waveform(waveform)
-        with mx.stream(mx.new_thread_local_stream(mx.gpu)):
+        with mx.stream(self.stream):
             latent = self.audio_vae.encode_latent(mx.array(waveform.float().numpy()))
             prompt_latent = torch.from_numpy(np.array(latent.astype(mx.float32)))
         return {
@@ -69,6 +74,11 @@ class MingMlxAudioDecoder:
         self.streaming_ready = False
         self.states: dict[int, AudioDecoderState] = {}
 
+    @cached_property
+    def stream(self) -> mx.Stream:
+        # Note (altale): Create on first inference, not on the factory/warmup thread.
+        return mx.new_thread_local_stream(mx.gpu)
+
     def prepare_streaming(self) -> None:
         self.streaming_ready = True
 
@@ -77,7 +87,7 @@ class MingMlxAudioDecoder:
             return torch.empty(0, dtype=torch.float32)
         else:
             pass
-        with mx.stream(mx.new_thread_local_stream(mx.gpu)):
+        with mx.stream(self.stream):
             latent = mx.array(latents.detach().cpu().float().numpy()).reshape(
                 1, -1, latents.shape[-1]
             )
@@ -93,7 +103,7 @@ class MingMlxAudioDecoder:
     ) -> tuple[torch.Tensor, ...]:
         waveforms = []
         try:
-            with mx.stream(mx.new_thread_local_stream(mx.gpu)):
+            with mx.stream(self.stream):
                 for slot, patches, terminal in zip(
                     slot_ids, patch_groups, terminal_flags, strict=True
                 ):

@@ -29,7 +29,9 @@ from sglang_omni.models.ming_tts.payload_types import MingTTSState
 from sglang_omni.proto import OmniRequest, StagePayload
 
 
-@pytest.mark.skipif(not torch.backends.mps.is_available(), reason="Requires Apple Metal")
+@pytest.mark.skipif(
+    not torch.backends.mps.is_available(), reason="Requires Apple Metal"
+)
 def test_mps_audio_vae_encode_and_full_decode() -> None:
     backbone = dict(
         vocab_size=8,

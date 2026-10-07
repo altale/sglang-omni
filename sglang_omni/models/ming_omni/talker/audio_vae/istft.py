@@ -126,6 +126,7 @@ class ISTFT(nn.Module):
             # The large overlap-add used by Ming (n_fft=3528) can trigger an
             # Ascend vector-core fault in torch.nn.functional.fold. Keep the
             # neural decoder and spectrogram on NPU, but run only ISTFT on CPU.
+            # Note (altale): MPS spectra are already on CPU; move the window there too.
             spec = spec.cpu()
             audio_buffer = audio_buffer.cpu() if audio_buffer is not None else None
             window_buffer = window_buffer.cpu() if window_buffer is not None else None

@@ -18,15 +18,22 @@ class MRotaryEmbedding(nn.Module):
     def __init__(self, config: TextConfig) -> None:
         super().__init__()
         self.sections = config.mrope_section
-        self._inv_freq = 1.0 / (  # noqa: leading-underscore - Exclude the buffer from MLX parameters.
-            config.rope_theta
-            ** (mx.arange(0, config.head_dim, 2, dtype=mx.float32) / config.head_dim)
+        self._inv_freq = (
+            1.0
+            / (  # noqa: leading-underscore - Exclude the buffer from MLX parameters.
+                config.rope_theta
+                ** (
+                    mx.arange(0, config.head_dim, 2, dtype=mx.float32) / config.head_dim
+                )
+            )
         )
         # Note (altale): Private buffers need evaluation before the thread handoff.
         mx.eval(self._inv_freq)  # noqa: leading-underscore - MLX buffer.
 
     def __call__(self, x: mx.array, positions: mx.array) -> mx.array:
-        phases = positions[..., None].astype(mx.float32) * self._inv_freq  # noqa: leading-underscore - MLX buffer.
+        phases = (
+            positions[..., None].astype(mx.float32) * self._inv_freq
+        )  # noqa: leading-underscore - MLX buffer.
         parts = []
         start = 0
         for axis, width in enumerate(self.sections):

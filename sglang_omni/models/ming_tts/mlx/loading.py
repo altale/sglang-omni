@@ -5,11 +5,19 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import Any, Literal
+from typing import TYPE_CHECKING, Literal
 
 from pydantic import JsonValue
 
 from sglang_omni.models.ming_tts.mlx.config import ModelConfig
+
+if TYPE_CHECKING:
+    import mlx.core as mx
+
+    from sglang_omni.models.ming_tts.mlx.audio_vae import AudioVAE
+    from sglang_omni.models.ming_tts.mlx.model import MingTTSModel
+else:
+    pass
 
 
 def checkpoint_files(model_path: str | Path) -> list[Path]:
@@ -43,7 +51,7 @@ def read_config(model_path: str | Path) -> dict[str, JsonValue]:
 
 def load_component_weights(
     model_path: str | Path, *, component: Literal["ar", "audio"]
-) -> dict[str, Any]:
+) -> dict[str, mx.array]:
     import mlx.core as mx
 
     weights: dict[str, mx.array] = {}
@@ -64,7 +72,7 @@ def load_component_weights(
 
 def load_ming_tts_model(
     model_path: str | Path, *, quantization: str | None = None
-) -> Any:
+) -> MingTTSModel:
     import mlx.core as mx
     import mlx.nn as nn
 
@@ -106,7 +114,7 @@ def load_ming_tts_model(
 
 def load_ming_audio_vae(
     model_path: str | Path, *, component: Literal["encoder", "decoder"]
-) -> Any:
+) -> AudioVAE:
     import mlx.core as mx
 
     from sglang_omni.models.ming_tts.mlx.audio_vae import AudioVAE

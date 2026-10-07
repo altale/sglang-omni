@@ -6,6 +6,8 @@ from dataclasses import dataclass, fields
 
 from pydantic import JsonValue
 
+from sglang_omni.models.ming_tts.hf_config import MING_TTS_MROPE_SECTION
+
 
 @dataclass
 class TextConfig:
@@ -92,7 +94,7 @@ class TextConfig:
             return (self.head_dim // 2, 0, 0)
         else:
             pass
-        return tuple(self.rope_scaling.get("mrope_section", (16, 24, 24)))
+        return tuple(self.rope_scaling.get("mrope_section", MING_TTS_MROPE_SECTION))
 
     @classmethod
     def from_dict(cls, params: dict[str, JsonValue]) -> TextConfig:

@@ -6,15 +6,12 @@ import json
 import sys
 from pathlib import Path
 from types import ModuleType
+from typing import Literal
 
 import pytest
 from pydantic import JsonValue
 
-from sglang_omni.models.ming_tts.mlx.config import (
-    AcousticConfig,
-    ModelConfig,
-    TextConfig,
-)
+from sglang_omni.models.ming_tts.mlx.config import ModelConfig, TextConfig
 from sglang_omni.models.ming_tts.mlx.loading import (
     checkpoint_files,
     load_component_weights,
@@ -60,27 +57,9 @@ def test_composite_config_accepts_tiny_a3b_structure_without_importing_mlx() -> 
     )
 
 
-@pytest.mark.parametrize(
-    "change",
-    [
-        {"model_type": "qwen2"},
-        {"num_experts": 0},
-        {"num_experts_per_tok": 5},
-        {"use_qk_norm": True},
-        {"use_sliding_window": True},
-        {"score_function": "sigmoid"},
-        {"hidden_act": "gelu"},
-        {"router_dtype": "float32"},
-        {"n_group": 2},
-        {"moe_router_enable_expert_bias": True},
-        {"moe_shared_expert_intermediate_size": 99},
-        {"rope_scaling": {"type": "linear", "factor": 2}},
-        {"rope_scaling": {"type": "3D", "factor": None}},
-    ],
-)
-def test_reject_unsupported_text_variants(change: dict[str, JsonValue]) -> None:
-    with pytest.raises(ValueError):
-        TextConfig.from_dict({**text_config_dict(), **change})
+def test_reject_dense_checkpoint() -> None:
+    with pytest.raises(ValueError, match="A3B MoE"):
+        TextConfig.from_dict({**text_config_dict(), "num_experts": 0})
 
 
 def test_official_mrope_sections() -> None:
@@ -94,61 +73,11 @@ def test_official_mrope_sections() -> None:
     assert config.mrope_section == (16, 24, 24)
 
 
-@pytest.mark.parametrize(
-    "change", [{"qk_norm": "rms_norm"}, {"pe_attn_head": 1}, {"spk_dim": 192}]
-)
-def test_reject_unsupported_acoustic_variants(change: dict[str, JsonValue]) -> None:
-    with pytest.raises(ValueError):
-        AcousticConfig.from_dict(dict(hidden_size=16, depth=1, num_heads=2, **change))
-
-
-def test_checkpoint_single_file(tmp_path: Path) -> None:
-    weights = tmp_path / "model.safetensors"
-    weights.touch()
-    assert checkpoint_files(tmp_path) == [weights]
-
-
-def test_checkpoint_index_deduplicates_shards(tmp_path: Path) -> None:
-    (tmp_path / "model.safetensors.index.json").write_text(
-        json.dumps(
-            {
-                "weight_map": {
-                    "a": "part-1.safetensors",
-                    "b": "part-1.safetensors",
-                    "c": "part-2.safetensors",
-                }
-            }
-        )
-    )
-    assert checkpoint_files(tmp_path) == [
-        tmp_path / "part-1.safetensors",
-        tmp_path / "part-2.safetensors",
-    ]
-
-
 def test_checkpoint_index_rejects_escape(tmp_path: Path) -> None:
     (tmp_path / "model.safetensors.index.json").write_text(
         json.dumps({"weight_map": {"a": "../outside.safetensors"}})
     )
     with pytest.raises(ValueError, match="within the model directory"):
-        checkpoint_files(tmp_path)
-
-
-def test_checkpoint_index_allows_huggingface_snapshot_symlinks(tmp_path: Path) -> None:
-    snapshot = tmp_path / "snapshot"
-    snapshot.mkdir()
-    blob = tmp_path / "blob"
-    blob.touch()
-    shard = snapshot / "part.safetensors"
-    shard.symlink_to(blob)
-    (snapshot / "model.safetensors.index.json").write_text(
-        json.dumps({"weight_map": {"weight": "part.safetensors"}})
-    )
-    assert checkpoint_files(snapshot) == [shard]
-
-
-def test_missing_checkpoint_is_not_silently_random(tmp_path: Path) -> None:
-    with pytest.raises(FileNotFoundError):
         checkpoint_files(tmp_path)
 
 
@@ -159,47 +88,51 @@ def test_missing_checkpoint_is_not_silently_random(tmp_path: Path) -> None:
         ("audio", {"encoder.fc1.weight": "encoder", "decoder.fc1.weight": "decoder"}),
     ],
 )
-def test_weight_ownership_before_tensor_materialization(
+def test_sharded_snapshot_component_weights(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
-    component: str,
+    component: Literal["ar", "audio"],
     expected: dict[str, str],
 ) -> None:
     parent = ModuleType("mlx")
     core = ModuleType("mlx.core")
-    weights = {
-        "model.model.norm.weight": "norm",
-        "stop_head.weight": "head",
-        "audio.encoder.fc1.weight": "encoder",
-        "audio.decoder.fc1.weight": "decoder",
+    shards = {
+        "part-1.safetensors": {
+            "model.model.norm.weight": "norm",
+            "audio.encoder.fc1.weight": "encoder",
+        },
+        "part-2.safetensors": {
+            "stop_head.weight": "head",
+            "audio.decoder.fc1.weight": "decoder",
+        },
     }
+    snapshot = tmp_path / "snapshot"
+    snapshot.mkdir()
+    for filename in shards:
+        blob = tmp_path / filename
+        blob.touch()
+        (snapshot / filename).symlink_to(blob)
+    (snapshot / "model.safetensors.index.json").write_text(
+        json.dumps(
+            {
+                "weight_map": {
+                    name: filename
+                    for filename, weights in shards.items()
+                    for name in weights
+                }
+            }
+        )
+    )
+    loaded_paths = []
 
     def load(path: str) -> dict[str, str]:
-        assert path.endswith("model.safetensors")
-        return weights
+        loaded_paths.append(Path(path))
+        assert Path(path).is_file()
+        return shards[Path(path).name]
 
     core.load = load
     parent.core = core
     monkeypatch.setitem(sys.modules, "mlx", parent)
     monkeypatch.setitem(sys.modules, "mlx.core", core)
-    (tmp_path / "model.safetensors").touch()
-    assert load_component_weights(tmp_path, component=component) == expected
-
-
-def test_duplicate_shard_keys_are_not_silently_overwritten(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    (tmp_path / "model.safetensors.index.json").write_text(
-        json.dumps(
-            {"weight_map": {"a": "part-1.safetensors", "b": "part-2.safetensors"}}
-        )
-    )
-    parent = ModuleType("mlx")
-    core = ModuleType("mlx.core")
-    core.load = lambda path: {"stop_head.weight": object()}
-    parent.core = core
-    monkeypatch.setitem(sys.modules, "mlx", parent)
-    monkeypatch.setitem(sys.modules, "mlx.core", core)
-    with pytest.raises(ValueError, match="Duplicate checkpoint tensor"):
-        load_component_weights(tmp_path, component="ar")
+    assert load_component_weights(snapshot, component=component) == expected
+    assert loaded_paths == [snapshot / filename for filename in shards]

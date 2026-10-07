@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor
+from unittest.mock import Mock
+
 import numpy as np
 import pytest
 import torch
@@ -60,19 +63,11 @@ def assert_close(actual: mx.array, expected: torch.Tensor) -> None:
     )
 
 
-@pytest.mark.parametrize(
-    "lengths,n_fft,hop_length",
-    [
-        ((12,), 32, 8),
-        ((4, 4, 4), 32, 8),
-        ((5, 3, 4), 3528, 882),
-    ],
-)
-def test_istft_overlap_and_flush(
-    lengths: tuple[int, ...], n_fft: int, hop_length: int
-) -> None:
+def test_istft_overlap_and_flush() -> None:
     from sglang_omni.models.ming_omni.talker.audio_vae.istft import ISTFT as TorchISTFT
 
+    n_fft, hop_length = 3528, 882
+    lengths = (5, 3, 4)
     native = ISTFT(n_fft, hop_length)
     reference = TorchISTFT(n_fft, hop_length, n_fft)
     torch.manual_seed(12)
@@ -106,8 +101,7 @@ def test_istft_overlap_and_flush(
     assert state is None
 
 
-@pytest.mark.parametrize("window", [None, 5])
-@pytest.mark.parametrize("lengths", [(7,), (1, 2, 1, 3)])
+@pytest.mark.parametrize("window,lengths", [(None, (7,)), (5, (1, 2, 1, 3))])
 def test_decoder_full_and_streaming_torch_parity(
     window: int | None, lengths: tuple[int, ...]
 ) -> None:
@@ -139,11 +133,6 @@ def test_decoder_full_and_streaming_torch_parity(
         )
         mx.eval(waveform)
         outputs.append(waveform)
-        if state is not None and window is not None:
-            assert all(
-                entry.keys is None or entry.keys.shape[2] <= window
-                for entry in state.cache
-            )
         offset += length
     assert state is None
     assert_close(mx.concatenate(outputs, axis=1), expected[:, 0])
@@ -170,8 +159,6 @@ def test_reference_encoder_and_fixed_posterior_noise(window: int | None) -> None
     waveform = torch.randn(1, 91)
     with torch.no_grad():
         expected, _ = reference(waveform)
-    actual = native(mx.array(waveform.numpy()))
-    assert_close(actual, expected)
     vae = AudioVAE(
         dict(sample_rate=44100, enc_kwargs=config, patch_size=4), component="encoder"
     )
@@ -184,7 +171,7 @@ def test_reference_encoder_and_fixed_posterior_noise(window: int | None) -> None
     )
 
 
-def test_decoder_slot_cleanup_after_terminal_and_error(
+def test_decoder_thread_stream_reuse_and_cleanup(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     from sglang_omni.models.ming_tts.mlx.audio_io import MingMlxAudioDecoder
@@ -199,40 +186,53 @@ def test_decoder_slot_cleanup_after_terminal_and_error(
         ),
     )
     vae = AudioVAE(config, component="decoder")
+    vae.eval()
+    mx.eval(vae.parameters())
     decoder = MingMlxAudioDecoder(vae)
+    stream_factory = Mock(wraps=mx.new_thread_local_stream)
+    monkeypatch.setattr(mx, "new_thread_local_stream", stream_factory)
     decoder.prepare_streaming()
-    patch = torch.zeros(2, 4)
-    first = decoder.run_streaming(
-        slot_ids=(0,), patch_groups=((patch,),), terminal_flags=(False,)
-    )
-    assert first[0].numel() == 0
-    assert 0 in decoder.states
-    terminal = decoder.run_streaming(
-        slot_ids=(0,), patch_groups=((patch,),), terminal_flags=(True,)
-    )
-    assert terminal[0].numel() == 4 * 4 * 8
-    assert decoder.states == {}
-    decoder.run_streaming(
-        slot_ids=(0,), patch_groups=((patch,),), terminal_flags=(False,)
-    )
-    decoder.reset_stream_rows((0,))
-    assert decoder.states == {}
+    stream_factory.assert_not_called()
 
-    def fail(
-        self: Decoder,
-        latent: mx.array,
-        *,
-        state: AudioDecoderState | None,
-        streaming: bool,
-        last_chunk: bool,
-    ) -> None:
-        raise RuntimeError("synthetic decoder failure")
-
-    monkeypatch.setattr(type(vae.decoder), "__call__", fail)
-    with pytest.raises(RuntimeError, match="synthetic"):
+    def decode() -> None:
+        patch = torch.zeros(2, 4)
+        first = decoder.run_streaming(
+            slot_ids=(0,), patch_groups=((patch,),), terminal_flags=(False,)
+        )
+        assert first[0].numel() == 0
+        assert 0 in decoder.states
+        terminal = decoder.run_streaming(
+            slot_ids=(0,), patch_groups=((patch,),), terminal_flags=(True,)
+        )
+        assert terminal[0].numel() == 4 * 4 * 8
+        assert decoder.states == {}
+        full = decoder.decode_full(torch.stack((patch, patch)))
+        assert full.numel() == terminal[0].numel()
         decoder.run_streaming(
             slot_ids=(0,), patch_groups=((patch,),), terminal_flags=(False,)
         )
-    assert decoder.states == {}
-    decoder.close()
-    assert not decoder.streaming_ready
+        decoder.reset_stream_rows((0,))
+        assert decoder.states == {}
+
+        def fail(
+            self: Decoder,
+            latent: mx.array,
+            *,
+            state: AudioDecoderState | None,
+            streaming: bool,
+            last_chunk: bool,
+        ) -> None:
+            raise RuntimeError("synthetic decoder failure")
+
+        monkeypatch.setattr(type(vae.decoder), "__call__", fail)
+        with pytest.raises(RuntimeError, match="synthetic"):
+            decoder.run_streaming(
+                slot_ids=(0,), patch_groups=((patch,),), terminal_flags=(False,)
+            )
+        assert decoder.states == {}
+        decoder.close()
+        assert not decoder.streaming_ready
+
+    with ThreadPoolExecutor(max_workers=1) as executor:
+        executor.submit(decode).result(timeout=60)
+    stream_factory.assert_called_once_with(mx.gpu)

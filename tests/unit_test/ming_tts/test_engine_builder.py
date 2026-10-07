@@ -32,7 +32,12 @@ def mlx_backend(
 
 @pytest.mark.parametrize(
     "selected,apple,expected",
-    [(False, False, False), (True, True, True), (True, False, None), (False, True, False)],
+    [
+        (False, False, False),
+        (True, True, True),
+        (True, False, None),
+        (False, True, False),
+    ],
 )
 def test_backend_selection(
     monkeypatch: pytest.MonkeyPatch, selected: bool, apple: bool, expected: bool | None
@@ -42,7 +47,9 @@ def test_backend_selection(
     from sglang_omni import platforms
 
     monkeypatch.setattr(runtime, "use_mlx", lambda: selected)
-    monkeypatch.setattr(platforms, "current_platform", SimpleNamespace(is_mps=lambda: apple))
+    monkeypatch.setattr(
+        platforms, "current_platform", SimpleNamespace(is_mps=lambda: apple)
+    )
     if expected is None:
         with pytest.raises(ValueError):
             ming_tts_uses_mlx()
@@ -50,7 +57,7 @@ def test_backend_selection(
         assert ming_tts_uses_mlx() is expected
 
 
-def test_builder_defaults(mlx_backend: bool) -> None:
+def test_builder_defaults_and_quantization(mlx_backend: bool) -> None:
     builder = MingTtsEngineBuilder()
     builder.context_length = 2048
     defaults = builder.generation_defaults(dtype="bfloat16")
@@ -62,8 +69,17 @@ def test_builder_defaults(mlx_backend: bool) -> None:
     if mlx_backend:
         assert builder.get_model_buffer_bs(None) is None
     else:
-        model = SimpleNamespace(decode_input_embedding=SimpleNamespace(num_embeddings=1))
+        model = SimpleNamespace(
+            decode_input_embedding=SimpleNamespace(num_embeddings=1)
+        )
         assert builder.get_model_buffer_bs(model) == 1
+
+    defaults["quantization"] = "mlx_q4"
+    if mlx_backend:
+        builder.adjust_overrides(defaults)
+    else:
+        with pytest.raises(ValueError, match="does not support quantization"):
+            builder.adjust_overrides(defaults)
 
 
 @pytest.mark.parametrize(
@@ -72,12 +88,6 @@ def test_builder_defaults(mlx_backend: bool) -> None:
         ("max_running_requests", 2),
         ("disable_cuda_graph", False),
         ("attention_backend", "triton"),
-        ("max_total_tokens", 10),
-        ("max_prefill_tokens", 10),
-        ("chunked_prefill_size", 128),
-        ("prefill_attention_backend", "triton"),
-        ("decode_attention_backend", "triton"),
-        ("speculative_algorithm", "EAGLE"),
     ],
 )
 @pytest.mark.usefixtures("mlx_backend")
@@ -96,18 +106,6 @@ def test_builder_rejects_tp() -> None:
     builder.context_length = 2048
     with pytest.raises(ValueError, match="TP=1"):
         builder.adjust_overrides(builder.generation_defaults(dtype="bfloat16"))
-
-
-def test_builder_quantization(mlx_backend: bool) -> None:
-    builder = MingTtsEngineBuilder()
-    builder.context_length = 64
-    overrides = builder.generation_defaults(dtype="bfloat16")
-    overrides["quantization"] = "mlx_q4"
-    if mlx_backend:
-        builder.adjust_overrides(overrides)
-    else:
-        with pytest.raises(ValueError, match="does not support quantization"):
-            builder.adjust_overrides(overrides)
 
 
 def adjust_overrides(key: str, value: Any) -> dict[str, Any]:

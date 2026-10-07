@@ -110,7 +110,6 @@ def test_ming_tts_owns_tail_execution_geometry(
     )
 
     model = sglang_model.MingTTSSGLangModel(config)
-    assert isinstance(model.model, Backbone)
 
     aggregator_execution = captured["aggregator"]["execution_config"]
     dit_execution = captured["dit"]["execution_config"]

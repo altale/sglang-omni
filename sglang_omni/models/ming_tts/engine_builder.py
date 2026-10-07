@@ -264,9 +264,12 @@ class MingTtsEngineBuilder(TtsEngineBuilder["MingTTSSGLangRequestData"]):
             raise ValueError(f"{backend} does not support speculative decoding")
         else:
             pass
-        if min(
-            int(overrides["max_total_tokens"]), int(overrides["max_prefill_tokens"])
-        ) < self.context_length:
+        if (
+            min(
+                int(overrides["max_total_tokens"]), int(overrides["max_prefill_tokens"])
+            )
+            < self.context_length
+        ):
             raise ValueError(
                 f"{backend} requires a full context token pool and unsplit prefill"
             )
@@ -360,7 +363,9 @@ class MingTtsEngineBuilder(TtsEngineBuilder["MingTTSSGLangRequestData"]):
         )
 
         if ming_tts_uses_mlx():
-            model = self.model_worker._mlx_runner.model  # noqa: leading-underscore - SGLang worker interface.
+            model = (
+                self.model_worker._mlx_runner.model
+            )  # noqa: leading-underscore - SGLang worker interface.
         else:
             pass
         return make_ming_tts_scheduler_adapters(

@@ -7,7 +7,7 @@ from collections.abc import Sequence
 from contextlib import nullcontext
 from dataclasses import dataclass
 from numbers import Integral
-from typing import cast
+from typing import TYPE_CHECKING, cast
 
 import torch
 import torch.nn as nn
@@ -26,6 +26,11 @@ from sglang_omni.models.ming_tts.payload_types import (
 from sglang_omni.proto import StagePayload
 from sglang_omni.scheduling.pipeline_state import build_usage
 from sglang_omni.utils.audio_payload import audio_waveform_payload
+
+if TYPE_CHECKING:
+    from sglang_omni.models.ming_tts.mlx.audio_io import MingMlxAudioDecoder
+else:
+    pass
 
 logger = logging.getLogger(__name__)
 
@@ -1095,7 +1100,7 @@ class MingAudioStreamingRunner:
 
 def decode_ming_tts_audio_payload(
     payload: StagePayload,
-    decoder: MingAudioDecoder | MingTorchAudioDecoder,
+    decoder: MingAudioDecoder | MingTorchAudioDecoder | MingMlxAudioDecoder,
     *,
     keep_latents: bool = False,
 ) -> StagePayload:
@@ -1125,4 +1130,4 @@ def decode_ming_tts_audio_payload(
     return payload
 
 
-__all__ = ["MingAudioDecoder", "decode_ming_tts_audio_payload"]
+__all__ = ["MingAudioDecoder", "MingTorchAudioDecoder", "decode_ming_tts_audio_payload"]

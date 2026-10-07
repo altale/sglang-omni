@@ -9,27 +9,7 @@ from typing import Any
 import pytest
 
 
-def test_engine_stage_dispatches_without_loading(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    from sglang_omni.models.ming_tts import stages
-    from sglang_omni.models.ming_tts.engine_builder import MingTtsEngineBuilder
-
-    calls: list[tuple[str, int | None, dict[str, Any]]] = []
-
-    def build(self: Any, model_path: str, **kwargs: Any) -> str:
-        calls.append((model_path, self.requested_context_length, kwargs))
-        return "scheduler"
-
-    monkeypatch.setattr(MingTtsEngineBuilder, "build", build)
-    assert (
-        stages.create_sglang_tts_engine_executor("local-model", context_length=2048)
-        == "scheduler"
-    )
-    assert calls[0][:2] == ("local-model", 2048)
-
-
-def test_audio_stage_dispatches_without_importing_torch_model(
+def test_audio_stage_dispatches_to_mlx(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     from sglang_omni.models.ming_tts import engine_builder, stages

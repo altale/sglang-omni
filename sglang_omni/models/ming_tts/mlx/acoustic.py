@@ -97,7 +97,9 @@ class TimestepEmbedder(nn.Module):
         mx.eval(self._freqs)  # noqa: leading-underscore - MLX buffer.
 
     def __call__(self, t: mx.array) -> mx.array:
-        phase = 1000 * t[:, None].astype(mx.float32) * self._freqs  # noqa: leading-underscore - MLX buffer.
+        phase = (
+            1000 * t[:, None].astype(mx.float32) * self._freqs
+        )  # noqa: leading-underscore - MLX buffer.
         x = mx.concatenate((mx.sin(phase), mx.cos(phase)), axis=-1)
         x = x.astype(self.time_mlp[0].weight.dtype)
         for layer in self.time_mlp:

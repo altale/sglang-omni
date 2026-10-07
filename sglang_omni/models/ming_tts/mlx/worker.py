@@ -63,7 +63,9 @@ class MingTTSMlxModelRunner(MlxSchedulerModelRunner):
         self, tp_worker: MlxTpModelWorker, output_processor: SGLangOutputProcessor
     ) -> None:
         super().__init__(tp_worker, output_processor)
-        self.backend: MingTTSMlxBackend = tp_worker._mlx_runner  # noqa: leading-underscore - SGLang worker interface.
+        self.backend: MingTTSMlxBackend = (
+            tp_worker._mlx_runner
+        )  # noqa: leading-underscore - SGLang worker interface.
         self.generated_latents: dict[str, list[torch.Tensor]] = {}
 
     def reset_request(self, request_id: str) -> None:

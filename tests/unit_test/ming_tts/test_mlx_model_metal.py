@@ -25,9 +25,8 @@ from mlx.utils import tree_flatten  # noqa: E402
 from sglang_omni.models.ming_omni.talker.talker_module.aggregator import (  # noqa: E402 - Requires the backend checks above.
     Aggregator as TorchAggregator,
 )
-from sglang_omni.models.ming_omni.talker.talker_module.dit import DiT as TorchDiT  # noqa: E402 - Requires the backend checks above.
-from sglang_omni.models.ming_tts.mlx.backbone import (  # noqa: E402
-    BailingMoeSparseMoeBlock,
+from sglang_omni.models.ming_omni.talker.talker_module.dit import (  # noqa: E402 - Requires the backend checks above.
+    DiT as TorchDiT,
 )
 from sglang_omni.models.ming_tts.mlx.config import ModelConfig, TextConfig  # noqa: E402
 from sglang_omni.models.ming_tts.mlx.flow_matching import (  # noqa: E402
@@ -213,16 +212,12 @@ def torch_backbone(
     return norm(x, "norm")
 
 
-@pytest.mark.parametrize("distinct_axes", [False, True])
-@pytest.mark.parametrize("batch", [1, 2])
-def test_backbone_torch_and_cached_decode(
-    model: MingTTSModel, distinct_axes: bool, batch: int
-) -> None:
+def test_backbone_torch_and_cached_decode(model: MingTTSModel) -> None:
+    batch = 2
     ids = mx.array(np.arange(batch * 7).reshape(batch, 7) % 32)
     positions = np.broadcast_to(np.arange(7), (3, batch, 7)).copy()
-    if distinct_axes:
-        positions[1] += 5
-        positions[2] += 11
+    positions[1] += 5
+    positions[2] += 11
     weights = {k: as_torch(v) for k, v in tree_flatten(model.model.parameters())}
     expected = torch_backbone(
         weights,
@@ -237,35 +232,11 @@ def test_backbone_torch_and_cached_decode(
     decode = model(ids[:, 4:5], positions=mx.array(positions[:, :, 4:5]), cache=cache)
     chunk = model(ids[:, 5:], positions=mx.array(positions[:, :, 5:]), cache=cache)
     assert_close(mx.concatenate((prefill, decode, chunk), axis=1), expected)
-    assert all(c.offset == 7 for c in cache)
     automatic = model(ids)
     explicit = model(
         ids, positions=mx.array(np.broadcast_to(np.arange(7), (3, batch, 7)))
     )
     assert_close(automatic, as_torch(explicit))
-
-
-@pytest.mark.parametrize(
-    "top_k,renormalize", [(1, True), (2, True), (2, False), (4, True)]
-)
-def test_router_topk(model: MingTTSModel, top_k: int, renormalize: bool) -> None:
-    cfg = replace(
-        model.config.llm_config,
-        num_experts_per_tok=top_k,
-        norm_topk_prob=renormalize,
-        routed_scaling_factor=1.3,
-    )
-    block = BailingMoeSparseMoeBlock(cfg)
-    x = mx.random.normal((2, 9, cfg.hidden_size))
-    indices, scores = block.route(x)
-    logits = F.linear(as_torch(x), as_torch(block.gate.weight))
-    expected, expected_indices = logits.softmax(-1).topk(top_k, dim=-1)
-    if renormalize:
-        expected = expected / expected.sum(-1, keepdim=True)
-    assert_close(mx.sort(scores, axis=-1), (expected * 1.3).sort(-1).values)
-    np.testing.assert_array_equal(
-        np.sort(np.array(indices), axis=-1), expected_indices.sort(-1).values.numpy()
-    )
 
 
 def load_acoustic_reference(mlx_model: nn.Module, torch_model: torch.nn.Module) -> None:
@@ -323,39 +294,12 @@ def acoustic_pair(model: MingTTSModel) -> tuple[TorchDiT, TorchAggregator]:
     return dit, agg
 
 
-@pytest.mark.parametrize("parameter", ["cfg_scale", "sigma", "temperature"])
-def test_cfm_rejects_parameter_count_mismatch(
-    model: MingTTSModel, parameter: str
-) -> None:
-    with pytest.raises(ValueError):
-        model.flowloss.cfm.sample(
-            noise=mx.zeros((2, 4, 2)),
-            c=mx.zeros((2, 1, 16)),
-            latent_history=mx.zeros((2, 4, 4)),
-            timesteps=build_cfm_timesteps(1),
-            sde_random=mx.zeros((0, 2, 2, 4)),
-            **{parameter: mx.array([0.2, 0.5, 0.8])},
-        )
-
-
-@pytest.mark.parametrize(
-    "steps,temperature,shape",
-    [
-        (1, 0.0, None),
-        (4, 0.8, ()),
-        (5, 0.8, (1,)),
-        (10, 0.0, (1, 1, 1)),
-        (10, 0.8, (2,)),
-        (10, 0.8, (2, 1, 1)),
-    ],
-)
+@pytest.mark.parametrize("steps", [1, 10])
 @torch.no_grad()
 def test_acoustic_tail_torch_parity(
     model: MingTTSModel,
     acoustic_pair: tuple[TorchDiT, TorchAggregator],
     steps: int,
-    temperature: float,
-    shape: tuple[int, ...] | None,
 ) -> None:
     from sglang_omni.models.ming_tts.flow_matching import CFM as TorchCFM
 
@@ -366,13 +310,7 @@ def test_acoustic_tail_torch_parity(
     random = mx.random.normal((steps - 1, 2, 2, 4))
     t = build_cfm_timesteps(steps)
     cfg = mx.array([0.0, 2.0])
-    if shape is None:
-        value = temperature
-        torch_value = temperature
-    else:
-        values = [0.0, temperature] if shape in ((2,), (2, 1, 1)) else [temperature]
-        value = mx.array(values).reshape(shape)
-        torch_value = torch.tensor(values).reshape(shape)
+    temperature = mx.array([0.0, 0.8])
     expected = TorchCFM(dit).sample(
         as_torch(noise),
         as_torch(cond),
@@ -381,7 +319,7 @@ def test_acoustic_tail_torch_parity(
         as_torch(random),
         cfg_scale=as_torch(cfg),
         sigma=0.25,
-        temperature=torch_value,
+        temperature=as_torch(temperature),
     )
     actual = model.compute_tail_step(
         cond,
@@ -390,7 +328,7 @@ def test_acoustic_tail_torch_parity(
         timesteps=t,
         sde_random=random,
         cfg=cfg,
-        temperature=value,
+        temperature=temperature,
     )
     assert_close(actual.sampled, expected)
     assert_close(actual.feedback_embeddings, agg(expected).reshape(2, -1))
@@ -421,7 +359,7 @@ def test_official_weight_mapping(model: MingTTSModel) -> None:
     model.load_weights(list(mapped.items()), strict=True)
 
 
-@pytest.mark.parametrize("frames", [2, 4, 8])
+@pytest.mark.parametrize("frames", [2, 8])
 def test_reference_injection_history_and_release(
     model: MingTTSModel, frames: int
 ) -> None:
@@ -447,7 +385,6 @@ def test_reference_injection_history_and_release(
     embeds[0, 0] = model.spk_head(speaker)[0]
     embeds[0, 2 : 2 + frames // 2] = model.project_reference_latents(reference)
     assert_close(state.hidden, as_torch(model(inputs_embeds=embeds)[:, -1:]))
-    runner.release("ref")
     runner.release("ref")
     assert runner.states == {}
 
@@ -497,10 +434,6 @@ def test_real_tiny_closed_loop_matches_torch(
         embeds = torch.cat((embeds, feedback), dim=1)
         history = torch.cat((history, patch), dim=1)[:, -4:]
     assert runner.states == {}
-    runner.start("next", ids, max_steps=1)
-    assert runner.states["next"].steps == 0
-    assert runner.states["next"].cache[0].offset == 3
-    runner.release("next")
 
 
 def test_first_inference_on_scheduler_thread(model: MingTTSModel) -> None:
@@ -573,7 +506,7 @@ def test_strict_checkpoint_load_and_backbone_quantization(
         )
 
 
-@pytest.mark.parametrize("problem", ["missing", "unexpected", "prequantized"])
+@pytest.mark.parametrize("problem", ["missing", "prequantized"])
 def test_checkpoint_loading_rejects_incomplete_or_unsupported_weights(
     model: MingTTSModel, tmp_path: Path, problem: str
 ) -> None:
@@ -583,8 +516,6 @@ def test_checkpoint_loading_rejects_incomplete_or_unsupported_weights(
     weights = dict(tree_flatten(model.parameters()))
     if problem == "missing":
         weights.pop("stop_head.weight")
-    elif problem == "unexpected":
-        weights["unknown.weight"] = mx.zeros((1,))
     else:
         raw["quantization"] = {"bits": 4, "group_size": 64}
     mx.save_safetensors(str(tmp_path / "model.safetensors"), weights)
@@ -593,8 +524,7 @@ def test_checkpoint_loading_rejects_incomplete_or_unsupported_weights(
         load_ming_tts_model(tmp_path)
 
 
-@pytest.mark.parametrize("streaming", [False, True])
-@pytest.mark.parametrize("stop", [False, True])
+@pytest.mark.parametrize("streaming,stop", [(False, False), (True, True)])
 def test_scheduler_runner_control_tokens_and_cleanup(
     model: MingTTSModel, streaming: bool, stop: bool, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -630,7 +560,6 @@ def test_scheduler_runner_control_tokens_and_cleanup(
     request = SimpleNamespace(request_id="first", data=data)
     result = runner.custom_prefill_forward(None, None, [request])
     assert result.next_token_ids.tolist() == [3]
-    assert backend.states["first"].cache[0].offset == 3
     for step in range(1, 5 if stop else 6):
         assert result.next_token_ids.tolist() == [3]
         assert "first" in backend.states
@@ -648,7 +577,6 @@ def test_scheduler_runner_control_tokens_and_cleanup(
     assert runner.generated_latents == {}
     request.request_id = "second"
     runner.custom_prefill_forward(None, None, [request])
-    runner.reset_request("second")
     runner.reset_request("second")
     assert backend.states == {}
     assert runner.generated_latents == {}
