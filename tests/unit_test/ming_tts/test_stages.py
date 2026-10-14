@@ -9,51 +9,6 @@ from typing import Any
 import pytest
 
 
-def test_preprocessing_rejects_streaming_before_work(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    from sglang_omni.models.ming_tts import stages
-    from sglang_omni.platforms import current_platform
-
-    monkeypatch.setattr(current_platform, "is_mps", lambda: True)
-    monkeypatch.setattr(stages, "_resolve_checkpoint", lambda _: "unused")
-    monkeypatch.setattr(
-        stages, "load_ming_tts_config", lambda _: SimpleNamespace(llm_config=None)
-    )
-    monkeypatch.setattr(stages, "load_ming_tts_tokenizer", lambda *a, **kw: None)
-    scheduler = stages.create_preprocessing_executor("unused", context_length=64)
-    payload = SimpleNamespace(request=SimpleNamespace(params={"stream": True}))
-    with pytest.raises(ValueError, match="non-streaming"):
-        scheduler.fn(payload)
-
-
-def test_audio_factory_uses_nonstream_decoder(monkeypatch: pytest.MonkeyPatch) -> None:
-    import torch
-
-    from sglang_omni.models.ming_tts import stages
-    from sglang_omni.models.ming_tts.audio_decode import MingTorchAudioDecoder
-    from sglang_omni.utils import device
-
-    monkeypatch.setattr(
-        device, "resolve_concrete_device", lambda *a: torch.device("mps")
-    )
-    monkeypatch.setattr(stages, "_resolve_checkpoint", lambda _: "unused")
-    monkeypatch.setattr(
-        stages,
-        "load_ming_tts_config",
-        lambda _: SimpleNamespace(audio_tokenizer_config=None),
-    )
-    monkeypatch.setattr(
-        stages, "resolve_ming_tts_audio_vae_config", lambda *a, **kw: None
-    )
-    vae = object()
-    monkeypatch.setattr(stages, "load_ming_tts_audio_vae", lambda *a, **kw: vae)
-    scheduler = stages.create_audio_decode_executor("unused")
-    decoder = scheduler.fn.keywords["decoder"]
-    assert isinstance(decoder, MingTorchAudioDecoder)
-    assert decoder.audio_vae is vae
-
-
 def test_ming_tts_audio_decode_factory_exposes_only_supported_contract() -> None:
     from sglang_omni.models.ming_tts.config import (
         MING_TTS_DEFAULT_INITIAL_CHUNK_PATCHES,
@@ -235,10 +190,10 @@ def test_ming_tts_audio_decode_factory_rejects_a_device_it_cannot_serve(
     )
     from sglang_omni.platforms import current_platform
 
-    monkeypatch.setattr(current_platform, "device_type", "cpu", raising=False)
+    monkeypatch.setattr(current_platform, "device_type", "mps", raising=False)
 
     with pytest.raises(ValueError, match="requires an available CUDA or XPU device"):
-        stages.create_audio_decode_executor("unused", device="cpu", gpu_id=0)
+        stages.create_audio_decode_executor("unused", device="mps", gpu_id=0)
 
 
 def patch_xpu_device_module(

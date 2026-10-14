@@ -59,7 +59,7 @@ Cross-request non-streaming AudioVAE batching is not implemented yet. The only s
 
 `stream_slots` is the maximum number of streaming requests that the AudioVAE decoder can keep active at the same time. Each active stream uses one slot to preserve its decoding progress between audio chunks. If all slots are occupied, additional streams wait until a slot is released. The provided configuration uses `stream_slots: 8` to match its concurrency-8 workload. Increasing it supports more simultaneous streams but uses more GPU memory and fixed-graph work; reducing it lowers those costs but also lowers streaming concurrency. It does not change non-streaming batching.
 
-### Apple Silicon
+### Apple Silicon (MLX)
 
 MLX uses the standalone Python server in `sglang_omni_mlx/ming_tts`, without
 SGLang workers or `SGLANG_USE_MLX`. From the repository root, install its dependencies
@@ -84,22 +84,6 @@ and use the request format below. Reference clips must be local mono audio reada
 SoundFile, such as WAV or FLAC. Torch/torchaudio are used only for CPU reference-audio
 resampling and filterbanks; the AR model and AudioVAE run in MLX. Reference conditioning
 is recomputed per request; cross-request reference caching is not implemented here.
-
-For Torch/MPS without quantization, follow the
-[Apple Silicon installation instructions](../get_started/installation.md) and omit the CUDA YAML:
-
-```bash
-SGLANG_USE_MLX=0 sgl-omni serve \
-  --model-path inclusionAI/Ming-omni-tts-16.8B-A3B \
-  --preprocessing.factory.context_length 2048 \
-  --reference_encode.factory.context_length 2048 \
-  --tts_engine.factory.context_length 2048 \
-  --model-name ming-omni-tts --port 8000
-```
-
-Torch/MPS supports TP=1, one active generation request, and non-streaming requests only.
-For reference audio on Torch/MPS, TorchCodec needs compatible FFmpeg shared libraries in the **server's** environment
-(the tested setup used `DYLD_LIBRARY_PATH="$(brew --prefix ffmpeg@8)/lib"`).
 
 ## Synthesizing Speech
 

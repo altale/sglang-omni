@@ -31,6 +31,7 @@ logger = logging.getLogger(__name__)
 
 
 class MingAudioDecoder:
+
     def __init__(
         self,
         audio_vae: AudioVAE,
@@ -84,49 +85,31 @@ class MingAudioDecoder:
     def close(self) -> None:
         self.streaming_runner.close()
 
+    @torch.inference_mode()
     def decode_full(self, latents: torch.Tensor) -> torch.Tensor:
-        return decode_audio_vae_full(self.audio_vae, latents)
-
-
-class MingTorchAudioDecoder:
-    def __init__(self, audio_vae: AudioVAE) -> None:
-        self.audio_vae = audio_vae
-
-    @property
-    def sample_rate(self) -> int:
-        return int(self.audio_vae.config.sample_rate)
-
-    def decode_full(self, latents: torch.Tensor) -> torch.Tensor:
-        return decode_audio_vae_full(self.audio_vae, latents)
-
-
-@torch.inference_mode()
-def decode_audio_vae_full(audio_vae: AudioVAE, latents: torch.Tensor) -> torch.Tensor:
-    if int(latents.shape[0]) == 0:
-        return torch.empty((0,), dtype=torch.float32)
-    else:
-        pass
-
-    first_parameter = next(audio_vae.parameters())
-    device = first_parameter.device
-    dtype = first_parameter.dtype
-    context = (
-        torch.autocast(device_type=device.type, dtype=dtype)
-        if device.type != "cpu" and dtype in (torch.float16, torch.bfloat16)
-        else nullcontext()
-    )
-    with context:
-        latents = latents.to(device=device, dtype=dtype)
-        sequence = latents.reshape(1, -1, latents.shape[-1])
-        waveform, _, _ = audio_vae.decode(
-            sequence,
-            past_key_values=None,
-            use_cache=False,
-            stream_state=(None, None, None),
-            last_chunk=True,
+        if int(latents.shape[0]) == 0:
+            return torch.empty((0,), dtype=torch.float32)
+        else:
+            pass
+        first_parameter = next(self.audio_vae.parameters())
+        device = first_parameter.device
+        dtype = first_parameter.dtype
+        context = (
+            torch.autocast(device_type=device.type, dtype=dtype)
+            if device.type != "cpu" and dtype in (torch.float16, torch.bfloat16)
+            else nullcontext()
         )
-
-    return waveform[0, 0].detach().to(device="cpu", dtype=torch.float32)
+        with context:
+            latents = latents.to(device=device, dtype=dtype)
+            sequence = latents.reshape(1, -1, latents.shape[-1])
+            waveform, _, _ = self.audio_vae.decode(
+                sequence,
+                past_key_values=None,
+                use_cache=False,
+                stream_state=(None, None, None),
+                last_chunk=True,
+            )
+        return waveform[0, 0].detach().to(device="cpu", dtype=torch.float32)
 
 
 @dataclass(frozen=True, slots=True)
@@ -1092,10 +1075,7 @@ class MingAudioStreamingRunner:
 
 
 def decode_ming_tts_audio_payload(
-    payload: StagePayload,
-    decoder: MingAudioDecoder | MingTorchAudioDecoder,
-    *,
-    keep_latents: bool = False,
+    payload: StagePayload, decoder: MingAudioDecoder, *, keep_latents: bool = False
 ) -> StagePayload:
     """Decode generated acoustic latents into the terminal waveform payload."""
     state = load_ming_tts_state(payload)
@@ -1123,4 +1103,4 @@ def decode_ming_tts_audio_payload(
     return payload
 
 
-__all__ = ["MingAudioDecoder", "MingTorchAudioDecoder", "decode_ming_tts_audio_payload"]
+__all__ = ["MingAudioDecoder", "decode_ming_tts_audio_payload"]
