@@ -8,7 +8,6 @@ import threading
 from collections.abc import Sequence
 from dataclasses import dataclass, field
 from functools import partial
-from typing import TYPE_CHECKING
 
 import torch
 
@@ -23,18 +22,13 @@ from sglang_omni.scheduling.message import IncomingMessage
 from sglang_omni.scheduling.pipeline_state import build_usage
 from sglang_omni.scheduling.streaming_vocoder import StreamingVocoderBase
 
-if TYPE_CHECKING:
-    from sglang_omni.models.ming_tts.mlx.audio_io import MingMlxAudioDecoder
-else:
-    pass
-
 logger = logging.getLogger(__name__)
 
 
 class AudioVAEStreamingSlotBindings:
     def __init__(
         self,
-        decoder: MingAudioDecoder | MingMlxAudioDecoder,
+        decoder: MingAudioDecoder,
     ) -> None:
         self.decoder = decoder
         self.request_to_slot: dict[str, int] = {}
@@ -129,7 +123,7 @@ class MingTTSStreamingVocoderScheduler(
 
     def __init__(
         self,
-        decoder: MingAudioDecoder | MingMlxAudioDecoder,
+        decoder: MingAudioDecoder,
         *,
         patch_size: int,
         latent_dim: int,

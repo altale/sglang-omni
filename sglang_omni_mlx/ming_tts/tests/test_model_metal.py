@@ -7,7 +7,7 @@ import json
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import asdict, replace
 from pathlib import Path
-from types import SimpleNamespace
+from threading import Event
 
 import numpy as np
 import pytest
@@ -28,12 +28,10 @@ from sglang_omni.models.ming_omni.talker.talker_module.aggregator import (  # no
 from sglang_omni.models.ming_omni.talker.talker_module.dit import (  # noqa: E402 - Requires the backend checks above.
     DiT as TorchDiT,
 )
-from sglang_omni.models.ming_tts.mlx.config import ModelConfig, TextConfig  # noqa: E402
-from sglang_omni.models.ming_tts.mlx.flow_matching import (  # noqa: E402
-    build_cfm_timesteps,
-)
-from sglang_omni.models.ming_tts.mlx.model import MingTTSModel  # noqa: E402
-from sglang_omni.models.ming_tts.mlx.runner import MingTTSMlxRunner  # noqa: E402
+from sglang_omni_mlx.ming_tts.config import ModelConfig, TextConfig  # noqa: E402
+from sglang_omni_mlx.ming_tts.flow_matching import build_cfm_timesteps  # noqa: E402
+from sglang_omni_mlx.ming_tts.model import MingTTSModel  # noqa: E402
+from sglang_omni_mlx.ming_tts.runner import MingTTSMlxRunner  # noqa: E402
 
 
 @pytest.fixture
@@ -468,7 +466,7 @@ def test_first_inference_on_scheduler_thread(model: MingTTSModel) -> None:
 def test_strict_checkpoint_load_and_backbone_quantization(
     config: ModelConfig, tmp_path: Path, quantization: str | None
 ) -> None:
-    from sglang_omni.models.ming_tts.mlx.loading import load_ming_tts_model
+    from sglang_omni_mlx.ming_tts.loading import load_ming_tts_model
 
     text = replace(
         config.llm_config,
@@ -510,7 +508,7 @@ def test_strict_checkpoint_load_and_backbone_quantization(
 def test_checkpoint_loading_rejects_incomplete_or_unsupported_weights(
     model: MingTTSModel, tmp_path: Path, problem: str
 ) -> None:
-    from sglang_omni.models.ming_tts.mlx.loading import load_ming_tts_model
+    from sglang_omni_mlx.ming_tts.loading import load_ming_tts_model
 
     raw = asdict(model.config)
     weights = dict(tree_flatten(model.parameters()))
@@ -524,81 +522,89 @@ def test_checkpoint_loading_rejects_incomplete_or_unsupported_weights(
         load_ming_tts_model(tmp_path)
 
 
-@pytest.mark.parametrize("streaming,stop", [(False, False), (True, True)])
-def test_scheduler_runner_control_tokens_and_cleanup(
-    model: MingTTSModel, streaming: bool, stop: bool, monkeypatch: pytest.MonkeyPatch
+def test_pipeline_full_streaming_and_cancel(
+    model: MingTTSModel, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    from sglang.srt.hardware_backend.mlx.kv_cache import ContiguousAttentionKVCache
+    from tokenizers import Tokenizer, models
 
-    from sglang_omni.models.ming_tts.mlx.worker import MingTTSMlxModelRunner
-    from sglang_omni.models.ming_tts.payload_types import MingTTSState
+    from sglang_omni_mlx.ming_tts import pipeline
+    from sglang_omni_mlx.ming_tts.audio_vae import AudioVAE
+    from sglang_omni_mlx.ming_tts.frontend import SpeechRequest
 
+    vocabulary = {
+        token: index
+        for index, token in enumerate(
+            [
+                "[UNK]",
+                "<role>",
+                "</role>",
+                "<audio>",
+                "<audioPatch>",
+                "<spk>",
+                "<|endoftext|>",
+            ]
+        )
+    }
+    tokenizer = Tokenizer(models.WordLevel(vocabulary, unk_token="[UNK]"))
+    tokenizer.add_special_tokens(list(vocabulary)[1:])
+    tokenizer.save(str(tmp_path / "tokenizer.json"))
+    audio_vae = AudioVAE(
+        dict(
+            sample_rate=44100,
+            patch_size=4,
+            dec_kwargs=dict(
+                latent_dim=4,
+                output_dim=8,
+                backbone=dict(
+                    hidden_size=16,
+                    intermediate_size=24,
+                    num_hidden_layers=2,
+                    num_attention_heads=2,
+                    num_key_value_heads=1,
+                    rms_norm_eps=1e-6,
+                    rope_theta=10000.0,
+                ),
+            ),
+        ),
+        component="decoder",
+    )
+    audio_vae.eval()
     model.stop_head.weight = mx.zeros_like(model.stop_head.weight)
-    model.stop_head.bias = mx.array([-20.0, 20.0] if stop else [20.0, -20.0])
-    backend = MingTTSMlxRunner(
-        model,
-        cache_factory=lambda: [
-            ContiguousAttentionKVCache(max_seq_len=64) for _ in model.model.layers
-        ],
+    model.stop_head.bias = mx.zeros_like(model.stop_head.bias)
+    mx.eval(model.parameters(), audio_vae.parameters())
+    monkeypatch.setattr(pipeline, "load_ming_tts_model", lambda *args, **kwargs: model)
+    monkeypatch.setattr(
+        pipeline, "load_ming_audio_vae", lambda *args, **kwargs: audio_vae
     )
-    worker = SimpleNamespace(
-        gpu_id=0, model_runner=SimpleNamespace(model=None), _mlx_runner=backend
-    )
-    runner = MingTTSMlxModelRunner(worker, SimpleNamespace(_capture_hidden=False))
-    data = SimpleNamespace(
-        state=MingTTSState(input_ids=[1, 2, 3]),
-        input_ids=torch.tensor([1, 2, 3]),
-        max_new_tokens=6,
-        generation_steps=0,
-        is_streaming=streaming,
-        audio_patch_token_id=3,
-        audio_eos_token_id=4,
-        stop_step=None,
-        generated_latents=None,
-        pending_stream_patch=None,
-    )
-    request = SimpleNamespace(request_id="first", data=data)
-    result = runner.custom_prefill_forward(None, None, [request])
-    assert result.next_token_ids.tolist() == [3]
-    for step in range(1, 5 if stop else 6):
-        assert result.next_token_ids.tolist() == [3]
-        assert "first" in backend.states
-        data.generation_steps = step
-        result = runner.custom_decode_forward(None, None, [request])
-    assert result.next_token_ids.tolist() == [4 if stop else 3]
-    assert backend.states == {}
-    assert data.stop_step == (4 if stop else None)
-    if streaming:
-        assert data.pending_stream_patch.is_last
-        assert data.generated_latents is None
-    else:
-        assert data.generated_latents.shape == (5 if stop else 6, 2, 4)
-    runner.reset_request("first")
-    assert runner.generated_latents == {}
-    request.request_id = "second"
-    runner.custom_prefill_forward(None, None, [request])
-    runner.reset_request("second")
-    assert backend.states == {}
-    assert runner.generated_latents == {}
 
-    request.request_id = "failure"
-    runner.custom_prefill_forward(None, None, [request])
+    def run() -> None:
+        service = pipeline.MingTTSPipeline(
+            str(tmp_path), context_length=64, quantization=None, reference_audio=False
+        )
+        outputs = []
+        for streaming in (False, True):
+            with mx.stream(service.stream):
+                mx.random.seed(2315)
+            request = SpeechRequest(
+                model="ming",
+                input="test",
+                max_new_tokens=7,
+                stream=streaming,
+                response_format="pcm",
+            )
+            chunks = list(service.generate(request, Event()))
+            assert len(chunks) == (2 if streaming else 1)
+            outputs.append(np.concatenate(chunks))
+            assert not service.runner.states
+            assert service.decoder.state is None
+        np.testing.assert_allclose(outputs[0], outputs[1], atol=3e-5, rtol=3e-4)
+        cancelled = Event()
+        generation = service.generate(request, cancelled)
+        assert next(generation).size > 0
+        cancelled.set()
+        generation.close()
+        assert not service.runner.states
+        assert service.decoder.state is None
 
-    def fail(
-        hidden_states: mx.array,
-        latent_history: mx.array,
-        *,
-        noise: mx.array,
-        timesteps: mx.array,
-        sde_random: mx.array,
-        cfg: float | mx.array,
-        sigma: float | mx.array,
-        temperature: float | mx.array,
-    ) -> None:
-        raise RuntimeError("synthetic acoustic failure")
-
-    monkeypatch.setattr(model, "compute_tail_step", fail)
-    with pytest.raises(RuntimeError, match="synthetic acoustic"):
-        runner.custom_decode_forward(None, None, [request])
-    assert backend.states == {}
-    assert runner.generated_latents == {}
+    with ThreadPoolExecutor(max_workers=1) as executor:
+        executor.submit(run).result(timeout=60)

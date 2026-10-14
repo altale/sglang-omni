@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""Native MLX Ming A3B AR model; AudioVAE is owned by a separate stage."""
+"""Native MLX Ming A3B autoregressive model and acoustic feedback."""
 
 from __future__ import annotations
 
@@ -10,10 +10,10 @@ import mlx.core as mx
 import mlx.nn as nn
 from mlx_lm.models.cache import KVCache
 
-from sglang_omni.models.ming_tts.mlx.acoustic import Aggregator
-from sglang_omni.models.ming_tts.mlx.backbone import BailingMoeTextModel
-from sglang_omni.models.ming_tts.mlx.config import AcousticConfig, ModelConfig
-from sglang_omni.models.ming_tts.mlx.flow_matching import FlowLoss
+from sglang_omni_mlx.ming_tts.acoustic import Aggregator
+from sglang_omni_mlx.ming_tts.backbone import BailingMoeTextModel
+from sglang_omni_mlx.ming_tts.config import AcousticConfig, ModelConfig
+from sglang_omni_mlx.ming_tts.flow_matching import FlowLoss
 
 
 @dataclass

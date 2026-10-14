@@ -11,7 +11,7 @@ from mlx_lm.models.base import create_attention_mask, scaled_dot_product_attenti
 from mlx_lm.models.cache import KVCache
 from mlx_lm.models.switch_layers import SwitchGLU
 
-from sglang_omni.models.ming_tts.mlx.config import TextConfig
+from sglang_omni_mlx.ming_tts.config import TextConfig
 
 
 class MRotaryEmbedding(nn.Module):

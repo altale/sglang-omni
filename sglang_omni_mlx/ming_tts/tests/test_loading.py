@@ -11,11 +11,8 @@ from typing import Literal
 import pytest
 from pydantic import JsonValue
 
-from sglang_omni.models.ming_tts.mlx.config import ModelConfig, TextConfig
-from sglang_omni.models.ming_tts.mlx.loading import (
-    checkpoint_files,
-    load_component_weights,
-)
+from sglang_omni_mlx.ming_tts.config import ModelConfig, TextConfig
+from sglang_omni_mlx.ming_tts.loading import checkpoint_files, load_component_weights
 
 
 def text_config_dict() -> dict[str, JsonValue]:

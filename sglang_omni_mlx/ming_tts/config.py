@@ -6,7 +6,7 @@ from dataclasses import dataclass, fields
 
 from pydantic import JsonValue
 
-from sglang_omni.models.ming_tts.hf_config import MING_TTS_MROPE_SECTION
+MING_TTS_MROPE_SECTION = (16, 24, 24)
 
 
 @dataclass

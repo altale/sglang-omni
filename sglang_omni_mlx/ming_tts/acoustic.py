@@ -8,7 +8,7 @@ import math
 import mlx.core as mx
 import mlx.nn as nn
 
-from sglang_omni.models.ming_tts.mlx.config import AcousticConfig
+from sglang_omni_mlx.ming_tts.config import AcousticConfig
 
 
 def rotary_frequencies(length: int, head_dim: int) -> tuple[mx.array, mx.array]:

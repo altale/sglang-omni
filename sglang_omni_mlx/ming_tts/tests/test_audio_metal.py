@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from concurrent.futures import ThreadPoolExecutor
-from unittest.mock import Mock
 
 import numpy as np
 import pytest
@@ -16,7 +15,7 @@ if not torch.backends.mps.is_available():
 mx = pytest.importorskip("mlx.core")
 nn = pytest.importorskip("mlx.nn")
 
-from sglang_omni.models.ming_tts.mlx.audio_vae import (  # noqa: E402
+from sglang_omni_mlx.ming_tts.audio_vae import (  # noqa: E402
     ISTFT,
     AudioDecoderState,
     AudioVAE,
@@ -171,10 +170,10 @@ def test_reference_encoder_and_fixed_posterior_noise(window: int | None) -> None
     )
 
 
-def test_decoder_thread_stream_reuse_and_cleanup(
+def test_decoder_thread_and_cleanup(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from sglang_omni.models.ming_tts.mlx.audio_io import MingMlxAudioDecoder
+    from sglang_omni_mlx.ming_tts.audio_io import MingMlxAudioDecoder
 
     config = dict(
         sample_rate=44100,
@@ -189,30 +188,20 @@ def test_decoder_thread_stream_reuse_and_cleanup(
     vae.eval()
     mx.eval(vae.parameters())
     decoder = MingMlxAudioDecoder(vae)
-    stream_factory = Mock(wraps=mx.new_thread_local_stream)
-    monkeypatch.setattr(mx, "new_thread_local_stream", stream_factory)
-    decoder.prepare_streaming()
-    stream_factory.assert_not_called()
 
     def decode() -> None:
-        patch = torch.zeros(2, 4)
-        first = decoder.run_streaming(
-            slot_ids=(0,), patch_groups=((patch,),), terminal_flags=(False,)
-        )
-        assert first[0].numel() == 0
-        assert 0 in decoder.states
-        terminal = decoder.run_streaming(
-            slot_ids=(0,), patch_groups=((patch,),), terminal_flags=(True,)
-        )
-        assert terminal[0].numel() == 4 * 4 * 8
-        assert decoder.states == {}
-        full = decoder.decode_full(torch.stack((patch, patch)))
-        assert full.numel() == terminal[0].numel()
-        decoder.run_streaming(
-            slot_ids=(0,), patch_groups=((patch,),), terminal_flags=(False,)
-        )
-        decoder.reset_stream_rows((0,))
-        assert decoder.states == {}
+        patch = mx.zeros((2, 4))
+        first = decoder.decode_chunk(patch, last_chunk=False)
+        assert first.size == 0
+        assert decoder.state is not None
+        terminal = decoder.decode_chunk(patch, last_chunk=True)
+        assert terminal.size == 4 * 4 * 8
+        assert decoder.state is None
+        full = decoder.decode_full(mx.stack((patch, patch)))
+        assert full.size == terminal.size
+        decoder.decode_chunk(patch, last_chunk=False)
+        decoder.reset()
+        assert decoder.state is None
 
         def fail(
             self: Decoder,
@@ -226,13 +215,12 @@ def test_decoder_thread_stream_reuse_and_cleanup(
 
         monkeypatch.setattr(type(vae.decoder), "__call__", fail)
         with pytest.raises(RuntimeError, match="synthetic"):
-            decoder.run_streaming(
-                slot_ids=(0,), patch_groups=((patch,),), terminal_flags=(False,)
-            )
-        assert decoder.states == {}
-        decoder.close()
-        assert not decoder.streaming_ready
+            decoder.decode_chunk(patch, last_chunk=False)
+        assert decoder.state is None
+
+    def run() -> None:
+        with mx.stream(mx.new_thread_local_stream(mx.gpu)):
+            decode()
 
     with ThreadPoolExecutor(max_workers=1) as executor:
-        executor.submit(decode).result(timeout=60)
-    stream_factory.assert_called_once_with(mx.gpu)
+        executor.submit(run).result(timeout=60)

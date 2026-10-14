@@ -7,57 +7,19 @@ from typing import Any
 
 import pytest
 
-from sglang_omni.models.ming_tts import engine_builder
-from sglang_omni.models.ming_tts.engine_builder import (
-    MingTtsEngineBuilder,
-    ming_tts_uses_mlx,
-)
+from sglang_omni.models.ming_tts.engine_builder import MingTtsEngineBuilder
 from sglang_omni.models.ming_tts.model_runner import MingTTSModelRunner
 
 
-@pytest.fixture(
-    params=[True, False],
-    ids=["mlx", "torch_mps"],
-)
-def mlx_backend(
-    request: pytest.FixtureRequest,
-    monkeypatch: pytest.MonkeyPatch,
-) -> bool:
+@pytest.fixture
+def mps_backend(monkeypatch: pytest.MonkeyPatch) -> None:
     from sglang_omni.platforms import current_platform
 
-    monkeypatch.setattr(engine_builder, "ming_tts_uses_mlx", lambda: request.param)
     monkeypatch.setattr(current_platform, "is_mps", lambda: True)
-    return request.param
 
 
-@pytest.mark.parametrize(
-    "selected,apple,expected",
-    [
-        (False, False, False),
-        (True, True, True),
-        (True, False, None),
-        (False, True, False),
-    ],
-)
-def test_backend_selection(
-    monkeypatch: pytest.MonkeyPatch, selected: bool, apple: bool, expected: bool | None
-) -> None:
-    from sglang.srt.hardware_backend.mlx import runtime
-
-    from sglang_omni import platforms
-
-    monkeypatch.setattr(runtime, "use_mlx", lambda: selected)
-    monkeypatch.setattr(
-        platforms, "current_platform", SimpleNamespace(is_mps=lambda: apple)
-    )
-    if expected is None:
-        with pytest.raises(ValueError):
-            ming_tts_uses_mlx()
-    else:
-        assert ming_tts_uses_mlx() is expected
-
-
-def test_builder_defaults_and_quantization(mlx_backend: bool) -> None:
+@pytest.mark.usefixtures("mps_backend")
+def test_builder_defaults_and_quantization() -> None:
     builder = MingTtsEngineBuilder()
     builder.context_length = 2048
     defaults = builder.generation_defaults(dtype="bfloat16")
@@ -66,20 +28,12 @@ def test_builder_defaults_and_quantization(mlx_backend: bool) -> None:
     assert defaults["max_total_tokens"] == 2048
     assert defaults["attention_backend"] == "torch_native"
     assert defaults["chunked_prefill_size"] == 0
-    if mlx_backend:
-        assert builder.get_model_buffer_bs(None) is None
-    else:
-        model = SimpleNamespace(
-            decode_input_embedding=SimpleNamespace(num_embeddings=1)
-        )
-        assert builder.get_model_buffer_bs(model) == 1
+    model = SimpleNamespace(decode_input_embedding=SimpleNamespace(num_embeddings=1))
+    assert builder.get_model_buffer_bs(model) == 1
 
     defaults["quantization"] = "mlx_q4"
-    if mlx_backend:
+    with pytest.raises(ValueError, match="does not support quantization"):
         builder.adjust_overrides(defaults)
-    else:
-        with pytest.raises(ValueError, match="does not support quantization"):
-            builder.adjust_overrides(defaults)
 
 
 @pytest.mark.parametrize(
@@ -90,7 +44,7 @@ def test_builder_defaults_and_quantization(mlx_backend: bool) -> None:
         ("attention_backend", "triton"),
     ],
 )
-@pytest.mark.usefixtures("mlx_backend")
+@pytest.mark.usefixtures("mps_backend")
 def test_builder_rejects_unsupported_execution(key: str, value: Any) -> None:
     builder = MingTtsEngineBuilder()
     builder.context_length = 2048
@@ -100,7 +54,7 @@ def test_builder_rejects_unsupported_execution(key: str, value: Any) -> None:
         builder.adjust_overrides(overrides)
 
 
-@pytest.mark.usefixtures("mlx_backend")
+@pytest.mark.usefixtures("mps_backend")
 def test_builder_rejects_tp() -> None:
     builder = MingTtsEngineBuilder(tp_size=2, nccl_port=12345)
     builder.context_length = 2048

@@ -1,21 +1,17 @@
 # SPDX-License-Identifier: Apache-2.0
-"""Synchronous Ming latent recurrence shared by component tests and the worker."""
+"""Synchronous Ming latent recurrence for standalone MLX inference."""
 
 from __future__ import annotations
 
 from collections.abc import Sequence
 from dataclasses import dataclass
-from typing import Literal, Protocol
+from typing import Literal
 
 import mlx.core as mx
 from mlx_lm.models.cache import KVCache
 
-from sglang_omni.models.ming_tts.mlx.flow_matching import build_cfm_timesteps
-from sglang_omni.models.ming_tts.mlx.model import MingTTSModel
-
-
-class CacheFactory(Protocol):
-    def __call__(self) -> list[KVCache]: ...
+from sglang_omni_mlx.ming_tts.flow_matching import build_cfm_timesteps
+from sglang_omni_mlx.ming_tts.model import MingTTSModel
 
 
 @dataclass
@@ -36,13 +32,10 @@ class LatentStep:
 
 
 class MingTTSMlxRunner:
-    def __init__(
-        self, model: MingTTSModel, *, cache_factory: CacheFactory | None = None
-    ) -> None:
+    def __init__(self, model: MingTTSModel) -> None:
         self.model = model
         self.model.eval()
         self.states: dict[str, RequestState] = {}
-        self.cache_factory = cache_factory or model.make_cache
 
     def start(
         self,
@@ -127,7 +120,7 @@ class MingTTSMlxRunner:
             history[:, -tail.shape[0] :] = tail[None]
         else:
             pass
-        cache = self.cache_factory()
+        cache = self.model.make_cache()
         hidden = self.model(inputs_embeds=embeds, cache=cache)[:, -1:]
         mx.eval(hidden, history, [c.state for c in cache])
         self.states[request_id] = RequestState(cache, hidden, history, max_steps)

@@ -9,33 +9,13 @@ from typing import Any
 import pytest
 
 
-def test_audio_stage_dispatches_to_mlx(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    from sglang_omni.models.ming_tts import engine_builder, stages
-
-    monkeypatch.setattr(engine_builder, "ming_tts_uses_mlx", lambda: True)
-    calls = []
-
-    def create(model_path: str, **kwargs: Any) -> str:
-        calls.append((model_path, kwargs))
-        return "audio-scheduler"
-
-    monkeypatch.setattr(stages, "create_mlx_audio_decode_executor", create)
-    assert stages.create_audio_decode_executor("local-model") == "audio-scheduler"
-    assert calls[0][1]["initial_chunk_patches"] == 2
-    with pytest.raises(ValueError, match="streaming_cuda_graph=false"):
-        stages.create_audio_decode_executor("local-model", streaming_cuda_graph=True)
-
-
 def test_preprocessing_rejects_streaming_before_work(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from sglang_omni.models.ming_tts import engine_builder, stages
+    from sglang_omni.models.ming_tts import stages
     from sglang_omni.platforms import current_platform
 
     monkeypatch.setattr(current_platform, "is_mps", lambda: True)
-    monkeypatch.setattr(engine_builder, "ming_tts_uses_mlx", lambda: False)
     monkeypatch.setattr(stages, "_resolve_checkpoint", lambda _: "unused")
     monkeypatch.setattr(
         stages, "load_ming_tts_config", lambda _: SimpleNamespace(llm_config=None)
@@ -50,11 +30,10 @@ def test_preprocessing_rejects_streaming_before_work(
 def test_audio_factory_uses_nonstream_decoder(monkeypatch: pytest.MonkeyPatch) -> None:
     import torch
 
-    from sglang_omni.models.ming_tts import engine_builder, stages
+    from sglang_omni.models.ming_tts import stages
     from sglang_omni.models.ming_tts.audio_decode import MingTorchAudioDecoder
     from sglang_omni.utils import device
 
-    monkeypatch.setattr(engine_builder, "ming_tts_uses_mlx", lambda: False)
     monkeypatch.setattr(
         device, "resolve_concrete_device", lambda *a: torch.device("mps")
     )
@@ -155,12 +134,7 @@ def patch_audio_decode_factory_dependencies(
 ) -> tuple[Any, list[dict[str, Any]], list[Any]]:
     import torch
 
-    from sglang_omni.models.ming_tts import (
-        audio_decode,
-        engine_builder,
-        stages,
-        streaming_vocoder,
-    )
+    from sglang_omni.models.ming_tts import audio_decode, stages, streaming_vocoder
 
     decoder_calls: list[dict[str, Any]] = []
     schedulers: list[Any] = []
@@ -190,7 +164,6 @@ def patch_audio_decode_factory_dependencies(
         def stop(self) -> None:
             self.stop_calls += 1
 
-    monkeypatch.setattr(engine_builder, "ming_tts_uses_mlx", lambda: False)
     monkeypatch.setattr(torch.cuda, "is_available", lambda: True)
     monkeypatch.setattr(torch.cuda, "device_count", lambda: 1)
     monkeypatch.setattr(torch.cuda, "current_device", lambda: 0)

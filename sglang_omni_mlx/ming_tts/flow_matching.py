@@ -9,8 +9,8 @@ import math
 import mlx.core as mx
 import mlx.nn as nn
 
-from sglang_omni.models.ming_tts.mlx.acoustic import DiT
-from sglang_omni.models.ming_tts.mlx.config import AcousticConfig
+from sglang_omni_mlx.ming_tts.acoustic import DiT
+from sglang_omni_mlx.ming_tts.config import AcousticConfig
 
 
 def build_cfm_timesteps(steps: int = 10, *, use_epss: bool = True) -> mx.array:

@@ -9,13 +9,13 @@ from typing import TYPE_CHECKING, Literal
 
 from pydantic import JsonValue
 
-from sglang_omni.models.ming_tts.mlx.config import ModelConfig
+from sglang_omni_mlx.ming_tts.config import ModelConfig
 
 if TYPE_CHECKING:
     import mlx.core as mx
 
-    from sglang_omni.models.ming_tts.mlx.audio_vae import AudioVAE
-    from sglang_omni.models.ming_tts.mlx.model import MingTTSModel
+    from sglang_omni_mlx.ming_tts.audio_vae import AudioVAE
+    from sglang_omni_mlx.ming_tts.model import MingTTSModel
 else:
     pass
 
@@ -76,7 +76,7 @@ def load_ming_tts_model(
     import mlx.core as mx
     import mlx.nn as nn
 
-    from sglang_omni.models.ming_tts.mlx.model import MingTTSModel
+    from sglang_omni_mlx.ming_tts.model import MingTTSModel
 
     raw = read_config(model_path)
     if raw.get("quantization") or raw.get("quantization_config"):
@@ -117,7 +117,7 @@ def load_ming_audio_vae(
 ) -> AudioVAE:
     import mlx.core as mx
 
-    from sglang_omni.models.ming_tts.mlx.audio_vae import AudioVAE
+    from sglang_omni_mlx.ming_tts.audio_vae import AudioVAE
 
     raw = read_config(model_path)
     if raw.get("quantization") or raw.get("quantization_config"):
