@@ -32,6 +32,10 @@ htmlcov/
 *.log
 *.txt
 !/sglang_omni_mlx/ming_tts/requirements.txt
+# Build definitions are sources, not logs.
+!CMakeLists.txt
+# Frozen judge prompts are hashed benchmark assets.
+!benchmarks/duplex/semantic/*.txt
 output.wav
 
 # OS
@@ -40,6 +44,7 @@ Thumbs.db
 .ruff_cache/
 uv.lock
 results/
+benchmarks/cache/
 .humanize/
 .benchmark-data/
 

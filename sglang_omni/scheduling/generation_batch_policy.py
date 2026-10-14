@@ -29,10 +29,10 @@ _MISSING = object()
 # multiple of the real token count.
 _PREFILL_PADDING_FACTOR = 2
 
-# note (luojiaxuan): prefill attention backends whose SGLang 0.5.20 graph
-# metadata captures an ordinary EXTEND batch. The triton backend only captures
-# decode, target verify and draft extend, so a full prefill graph over it fails
-# during capture.
+# note (luojiaxuan): prefill attention backends whose graph metadata captures
+# an ordinary EXTEND batch. The triton backend captures decode, target verify,
+# draft extend and dLLM extend, so a full prefill graph over it fails during
+# capture.
 FULL_PREFILL_ATTENTION_BACKENDS = frozenset({"fa3", "flashinfer"})
 
 
@@ -152,6 +152,7 @@ def operator_selected_prefill_backend(
 
 class GenerationStageDefaults(TypedDict, total=False):
     cuda_graph_bs_prefill: list[int]
+    cuda_graph_max_bs_prefill: int
     disable_cuda_graph: bool
     disable_overlap_schedule: bool
     disable_radix_cache: bool
@@ -164,6 +165,7 @@ class GenerationStageDefaults(TypedDict, total=False):
     max_total_tokens: int
     context_length: int
     max_queued_requests: int
+    prefill_decode_interval: int
     random_seed: int
     mem_fraction_static: float | None
     dtype: str

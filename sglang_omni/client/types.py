@@ -19,6 +19,11 @@ class UsageInfoDict(TokenUsageDict, total=False):
     engine_time_s: float
 
 
+# note (Yucheng Hu): finish reason reported on speech surfaces when the model
+# did not say how generation ended.
+UNKNOWN_FINISH_REASON = "unknown"
+
+
 @dataclass
 class Message:
     """Chat-style message."""
@@ -69,27 +74,32 @@ class UsageInfo:
 class SamplingParams:
     """Sampling configuration."""
 
-    temperature: float = 1.0
-    top_p: float = 1.0
-    top_k: int = -1
-    min_p: float = 0.0
-    repetition_penalty: float = 1.0
+    temperature: float | None = None
+    top_p: float | None = None
+    top_k: int | None = None
+    min_p: float | None = None
+    repetition_penalty: float | None = None
     stop: list[str] = field(default_factory=list)
     stop_token_ids: list[int] = field(default_factory=list)
     seed: int | None = None
     max_new_tokens: int | None = None
 
     def to_dict(self) -> dict[str, object]:
-        return {
+        # note (ratish): a field the caller left unset stays out, so the stage
+        # request builder applies its own model default.
+        values: dict[str, object] = {
             "temperature": self.temperature,
             "top_p": self.top_p,
             "top_k": self.top_k,
             "min_p": self.min_p,
             "repetition_penalty": self.repetition_penalty,
-            "stop": list(self.stop),
-            "stop_token_ids": list(self.stop_token_ids),
             "seed": self.seed,
             "max_new_tokens": self.max_new_tokens,
+        }
+        return {
+            **{name: value for name, value in values.items() if value is not None},
+            "stop": list(self.stop),
+            "stop_token_ids": list(self.stop_token_ids),
         }
 
 
@@ -150,6 +160,8 @@ class GenerateChunk:
     output_token_logprobs: list[list[float | int]] | None = None
     omni_rollout: dict[str, object] | None = None
     finish_reason: str | None = None
+    # note (Yucheng Hu): None preserves typed producers; empty marks a synthetic terminal reason.
+    model_finish_reason: str | None = None
     usage: UsageInfo | None = None
     weight_version: str | None = None
     stage_id: int | None = None
@@ -158,6 +170,13 @@ class GenerateChunk:
     language: str | None = None
     audio_data: object = None
     sample_rate: int | None = None
+
+    @property
+    def reported_finish_reason(self) -> str:
+        if self.model_finish_reason is None:
+            return self.finish_reason or ""
+        else:
+            return self.model_finish_reason
 
     def to_dict(self) -> dict[str, object]:
         return {
@@ -169,6 +188,7 @@ class GenerateChunk:
             "output_token_logprobs": self.output_token_logprobs,
             "omni_rollout": self.omni_rollout,
             "finish_reason": self.finish_reason,
+            "model_finish_reason": self.reported_finish_reason,
             "usage": self.usage.to_dict() if self.usage else None,
             "weight_version": self.weight_version,
             "stage_id": self.stage_id,
@@ -247,7 +267,7 @@ class SpeechResult:
     format: str
     sample_rate: int | None = None
     usage: UsageInfo | None = None
-    finish_reason: str | None = None
+    finish_reason: str = UNKNOWN_FINISH_REASON
 
 
 class ClientError(Exception):

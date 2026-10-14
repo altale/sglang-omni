@@ -87,6 +87,7 @@ class SchedulerExtras(TypedDict, Generic[RequestDataT], total=False):
     stream_output_builder: StreamOutputBuilder[RequestDataT] | None
     enable_async_decode: bool
     async_decode_min_batch_size: int
+    async_decode_resolve_before_prefill: bool
     prefill_coalesce_requests: int
     prefill_coalesce_wait_ms: float
     prefill_coalesce_when_idle: bool
@@ -134,6 +135,7 @@ class SGLangGenerationEngineBuilder(ABC, Generic[RequestDataT]):
         gpu_id: int | None = None,
         dtype: str = "bfloat16",
         server_args_overrides: Mapping[str, object] | None = None,
+        total_gpu_memory_fraction: float | None = None,
     ) -> "OmniScheduler[RequestDataT]":
         from sglang_omni.platforms import current_platform
         from sglang_omni.scheduling import bootstrap as scheduling_bootstrap
@@ -273,6 +275,10 @@ class SGLangGenerationEngineBuilder(ABC, Generic[RequestDataT]):
             )
 
         infra_kwargs["before_memory_pool"] = before_memory_pool
+        if total_gpu_memory_fraction is not None:
+            infra_kwargs["total_gpu_memory_fraction"] = total_gpu_memory_fraction
+        else:
+            pass
         prefill_graph_backend = get_prefill_cuda_graph_backend(server_args)
         if prefill_graph_backend == CudaGraphBackend.BREAKABLE:
             if not self.supports_breakable_prefill_cuda_graph:

@@ -248,6 +248,15 @@ def create_reference_encode_executor(
     return SimpleScheduler(_encode, max_concurrency=max_concurrency)
 
 
+def process_memory_bytes(device: torch.device) -> int | None:
+    import torch
+
+    if device.type == "cuda":
+        return get_process_gpu_memory_bytes(device.index)
+    else:
+        return int(torch.get_device_module(device).memory_reserved(device))
+
+
 def create_audio_decode_executor(
     model_path: str,
     *,
@@ -284,6 +293,15 @@ def create_audio_decode_executor(
     from sglang_omni.models.ming_tts.streaming_vocoder import (
         MingTTSStreamingVocoderScheduler,
     )
+
+    if streaming_cuda_graph and not current_platform.supports_graph_captured_fft():
+        logger.warning(
+            "ming_tts_audio_decode_streaming_graph stage=audio_decode "
+            f"requested=cuda_graph resolved=eager platform={current_platform.device_type}"
+        )
+        streaming_cuda_graph = False
+    else:
+        pass
 
     component_fraction = total_gpu_memory_fraction
     process_fraction = process_total_gpu_memory_fraction
@@ -373,14 +391,17 @@ def create_audio_decode_executor(
         )
     else:
         pass
-    if resolved_device.type != "cuda" or not torch.cuda.is_available():
+    if (
+        resolved_device.type not in ("cuda", "xpu")
+        or not torch.get_device_module(resolved_device).is_available()
+    ):
         raise ValueError(
-            "Ming-Omni-TTS fixed AudioVAE serving requires an available CUDA device"
+            "Ming-Omni-TTS fixed AudioVAE serving requires an available CUDA or XPU device"
         )
     else:
         pass
     logical_gpu_id = resolved_device.index
-    if logical_gpu_id >= torch.cuda.device_count():
+    if logical_gpu_id >= torch.get_device_module(resolved_device).device_count():
         raise ValueError(
             f"Ming-Omni-TTS audio decode GPU {logical_gpu_id} is not visible"
         )
@@ -397,7 +418,7 @@ def create_audio_decode_executor(
         pass
 
     device_info = get_gpu_device_info(logical_gpu_id)
-    pre_process_bytes = get_process_gpu_memory_bytes(logical_gpu_id)
+    pre_process_bytes = process_memory_bytes(resolved_device)
 
     checkpoint_dir = _resolve_checkpoint(model_path)
     config = load_ming_tts_config(checkpoint_dir)
@@ -465,7 +486,7 @@ def create_audio_decode_executor(
         raise
     try:
         scheduler.warmup_now()
-        post_process_bytes = get_process_gpu_memory_bytes(logical_gpu_id)
+        post_process_bytes = process_memory_bytes(resolved_device)
         process_delta_bytes = (
             post_process_bytes - pre_process_bytes
             if pre_process_bytes is not None and post_process_bytes is not None

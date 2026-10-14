@@ -22,6 +22,7 @@ from sglang_omni.pipeline.stage_workers import StageLaunchConfig, construct_stag
 from sglang_omni.proto import DataReadyMessage, SubmitMessage
 from sglang_omni.scheduling import omni_scheduler as omni_scheduler_module
 from sglang_omni.scheduling.omni_scheduler import OmniScheduler
+from sglang_omni.scheduling.session import SessionHooks, SessionScheduler
 from tests.unit_test.fixtures.pipeline_fakes import (
     EventLog,
     FakeRelay,
@@ -261,6 +262,35 @@ def test_stage_run_raises_when_scheduler_thread_crashes() -> None:
             await asyncio.wait_for(stage_obj.run(), timeout=2.0)
 
         assert scheduler.stopped is True
+
+    asyncio.run(run())
+
+
+class BlockingWarmUpHooks(SessionHooks):
+    def __init__(self) -> None:
+        self.entered = threading.Event()
+        self.release = threading.Event()
+        self.warm_up_thread_names: list[str] = []
+
+    def warm_up_serving_thread(self) -> None:
+        self.warm_up_thread_names.append(threading.current_thread().name)
+        self.entered.set()
+        self.release.wait()
+
+
+def test_stage_starts_only_after_its_session_hooks_warm_the_scheduler_thread() -> None:
+    async def run() -> None:
+        hooks = BlockingWarmUpHooks()
+        scheduler = SessionScheduler(hooks)
+        stage_obj = make_stage(name="speech", scheduler=scheduler)
+        start_task = asyncio.create_task(stage_obj.start())
+        assert await asyncio.to_thread(hooks.entered.wait, 1.0)
+        assert not start_task.done()
+
+        hooks.release.set()
+        await asyncio.wait_for(start_task, timeout=1.0)
+        assert hooks.warm_up_thread_names == ["scheduler-speech"]
+        await stage_obj.stop()
 
     asyncio.run(run())
 
@@ -1418,6 +1448,43 @@ def test_stage_local_object_requires_registered_target() -> None:
     asyncio.run(run())
 
 
+@pytest.mark.parametrize("replicated", [False, True])
+def test_stage_self_route_preserves_reentered_request_state(replicated: bool) -> None:
+    async def _run() -> None:
+        dispatcher = LocalStageDispatcher()
+        scheduler = FakeScheduler()
+        name = "thinker@r1" if replicated else "thinker"
+        stage = make_stage(
+            name=name,
+            get_next=lambda request_id, output: "thinker",
+            endpoints={name: "inproc://thinker"},
+            scheduler=scheduler,
+            same_process_targets={name},
+            local_dispatcher=dispatcher,
+            replica_topology=(
+                {"thinker": ["thinker@r0", "thinker@r1"]} if replicated else None
+            ),
+        )
+        dispatcher.register(stage)
+        stage.active_requests.add("req-reentry")
+        if replicated:
+            stage.record_replica_bindings("req-reentry", {"thinker": 1})
+
+        await stage.route_result(
+            "req-reentry",
+            make_stage_payload(request_id="req-reentry", data={"phase": 2}),
+        )
+
+        queued = scheduler.inbox.get_nowait()
+        assert queued.request_id == "req-reentry"
+        assert queued.data.data == {"phase": 2}
+        assert "req-reentry" in stage.active_requests
+        if replicated:
+            assert stage.replica_bindings["req-reentry"] == {"thinker": 1}
+
+    asyncio.run(_run())
+
+
 def test_local_dispatch_propagates_replica_bindings_to_receiver() -> None:
     async def run() -> None:
         dispatcher = LocalStageDispatcher()
@@ -1480,14 +1547,33 @@ def test_completed_request_id_can_record_new_replica_bindings() -> None:
     asyncio.run(run())
 
 
-def test_replica_bindings_not_recorded_after_abort() -> None:
-    stage = make_stage(
-        name="thinker",
-        replica_topology={"decode": ["decode@r0", "decode@r1"]},
-    )
-    stage.record_aborted_request_id("req-1")
-    stage.record_replica_bindings("req-1", {"decode": 1})
-    assert "req-1" not in stage.replica_bindings
+def test_aborted_request_id_resubmit_fails_without_new_state() -> None:
+    async def run() -> None:
+        stage = make_stage(
+            name="thinker",
+            replica_topology={"decode": ["decode@r0", "decode@r1"]},
+        )
+        stage.record_aborted_request_id("req-1")
+        stage.record_replica_bindings("req-1", {"decode": 1})
+        assert "req-1" not in stage.replica_bindings
+
+        await stage.on_submit(
+            SubmitMessage(
+                request_id="req-1",
+                data=make_stage_payload(request_id="req-1"),
+                replica_bindings={"decode": 1},
+            )
+        )
+
+        (completion,) = stage.control_plane.completions
+        assert completion.success is False
+        assert "use a fresh request ID" in completion.error
+        assert stage.scheduler.inbox.empty()
+        assert "req-1" not in stage.active_requests
+        assert "req-1" not in stage.replica_bindings
+        assert "req-1" in stage.aborted
+
+    asyncio.run(run())
 
 
 @pytest.mark.accelerator

@@ -14,6 +14,7 @@ from sglang_omni.models.fun_cosyvoice3 import stages
 from sglang_omni.models.fun_cosyvoice3.packed_dit import (
     DIT_INDUCTOR_OPTIONS,
     PackedDiT,
+    PackedRows,
     pack_rows,
 )
 
@@ -22,7 +23,12 @@ cosyvoice_dit = pytest.importorskip("cosyvoice.flow.DiT.dit")
 pytestmark = pytest.mark.accelerator
 
 TOL = 1e-4
-COMPILED_OVER_EAGER_ERROR = 2.0
+COMPILED_OVER_EAGER_ERROR = 1.1
+
+
+def rope(estimator: PackedDiT, rows: PackedRows) -> tuple[torch.Tensor, torch.Tensor]:
+    angles = estimator.rope_angles(rows.width)[:, rows.positions]
+    return angles.cos(), angles.sin()
 
 
 def native_inputs(batch: int, frames: int) -> tuple[torch.Tensor, ...]:
@@ -72,6 +78,7 @@ def test_compile_dit_backbone_matches_eager_beyond_the_warmup_shapes() -> None:
                 inputs = native_inputs(batch, frames)
                 cases.append((inputs, streaming, dit(*inputs, streaming=streaming)))
 
+    PackedDiT(dit, device="cuda")
     stages.compile_dit_backbone(flow, warmup_mel_frames=16, warmup_steps=1)
 
     with torch.inference_mode():
@@ -157,7 +164,7 @@ def test_production_packed_dit_compile_is_as_close_to_float32_as_eager() -> None
                 estimator.row_attention(
                     rows, streaming=streaming, dtype=inputs["spks"].dtype
                 ),
-                estimator.rope(rows),
+                rope(estimator, rows),
             )
 
     def run_float32(rows, inputs, streaming: bool) -> torch.Tensor:
@@ -171,7 +178,7 @@ def test_production_packed_dit_compile_is_as_close_to_float32_as_eager() -> None
                 floats["t"],
                 rows,
                 reference.row_attention(rows, streaming=streaming, dtype=torch.float32),
-                reference.rope(rows),
+                rope(reference, rows),
             )
 
     def error(actual: torch.Tensor, expected: torch.Tensor) -> float:
@@ -202,7 +209,7 @@ def test_production_packed_dit_compile_is_as_close_to_float32_as_eager() -> None
                 )
             )
 
-    assert estimator.rope(cases[0][0])[0].dtype == torch.float32
+    assert rope(estimator, cases[0][0])[0].dtype == torch.float32
     assert estimator.compile(torch.bfloat16)
     for rows, inputs, streaming, eager, float32 in cases:
         compiled = run(rows, inputs, streaming)
