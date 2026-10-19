@@ -82,8 +82,9 @@ MingAcoustic::MingAcoustic(const nlohmann::json &config,
               throw std::invalid_argument(
                   "Ming acoustic dimensions must be positive");
             } else {
-              return LoadComponentWeights(
-                  directory, {"flowloss.", "linear_proj_audio.", "stop_head."});
+              return LoadComponentWeights(directory,
+                                          {"flowloss.", "linear_proj_audio.",
+                                           "stop_head.", "spk_head."});
             }
           }(),
           config) {
@@ -126,6 +127,12 @@ MingAcoustic::MingAcoustic(const nlohmann::json &config,
   RequireShape(checkpoint_, std::string(kAggregator) + ".word_embedder.weight",
                {1, aggregator_.hidden_size});
   linear("stop_head", 2, llm_hidden_size_);
+  linear("spk_head", llm_hidden_size_, 192);
+}
+
+mx::array MingAcoustic::ProjectSpeaker(const mx::array &speaker) const {
+  return checkpoint_.Linear(
+      mx::astype(speaker, WeightDtype(checkpoint_, "spk_head")), "spk_head");
 }
 
 mx::array MingAcoustic::Blocks(mx::array hidden, const AcousticConfig &config,

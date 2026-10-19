@@ -18,8 +18,11 @@ LoadComponentWeights(const std::filesystem::path &directory,
   auto source = qwen3_asr::LoadSafetensors(directory);
   qwen3_asr::WeightMap weights;
   for (auto &[name, tensor] : source) {
-    // Note (altale): The audio decoder consumes hidden states, not token IDs.
-    if (name.starts_with("audio.decoder.decoder.embed_tokens.")) {
+    // Note (altale): Audio transformers consume hidden states, not token IDs.
+    if (name.starts_with("audio.decoder.decoder.embed_tokens.") ||
+        name.starts_with("audio.encoder.encoder.embed_tokens.") ||
+        name.starts_with("audio.encoder.aggregator.embed_tokens.") ||
+        name.starts_with("audio.encoder.norm.")) {
       continue;
     } else {
     }

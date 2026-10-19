@@ -56,4 +56,18 @@ private:
   AudioTransformer transformer_;
 };
 
+class MingAudioEncoder {
+public:
+  explicit MingAudioEncoder(const std::filesystem::path &directory);
+  mlx::core::array Encode(const mlx::core::array &waveform) const;
+
+private:
+  MingAudioEncoder(const nlohmann::json &config,
+                   const std::filesystem::path &directory);
+  int patch_size_, hop_length_, input_dim_, latent_dim_;
+  qwen3_asr::Checkpoint checkpoint_;
+  AudioTransformer transformer_;
+  std::optional<AudioTransformer> aggregator_;
+};
+
 } // namespace ming_tts

@@ -1,8 +1,9 @@
 # SPDX-License-Identifier: Apache-2.0
-"""Native TTS API and supervisor protocol tests."""
+"""Native Ming-TTS API and supervisor protocol tests."""
 
 from __future__ import annotations
 
+import base64
 import errno
 import http.client
 import io
@@ -239,6 +240,8 @@ def test_discovery(connection: http.client.HTTPConnection) -> None:
         ({"ref_audio": "/unused.wav"}, 400),
         ({"ref_text": "reference"}, 400),
         ({"ref_audio": "/unused.wav", "ref_text": "reference"}, 400),
+        ({"ref_audio": "data:audio/wav;base64,AAAA=", "ref_text": "reference"}, 400),
+        ({"ref_audio": "data:audio/wav;base64,====", "ref_text": "reference"}, 400),
     ],
 )
 def test_invalid_request(
@@ -332,11 +335,123 @@ def test_audio(
     connection.close()
 
 
-def test_disconnect_releases_request(connection: http.client.HTTPConnection) -> None:
+@pytest.mark.parametrize(
+    "sample_rate,channels,samples",
+    [(44100, 1, 4410), (16000, 2, 1600), (16000, 1, 100)],
+)
+def test_invalid_reference_wav(
+    connection: http.client.HTTPConnection,
+    sample_rate: int,
+    channels: int,
+    samples: int,
+) -> None:
+    buffer = io.BytesIO()
+    with wave.open(buffer, "wb") as waveform:
+        waveform.setparams((channels, 2, sample_rate, 0, "NONE", "not compressed"))
+        waveform.writeframes(bytes(samples * channels * 2))
+    request = {
+        "model": "ming-omni-tts",
+        "input": "你好。",
+        "ref_text": "参考音频。",
+        "ref_audio": "data:audio/wav;base64,"
+        + base64.b64encode(buffer.getvalue()).decode(),
+    }
+    connection.request(
+        "POST",
+        "/v1/audio/speech",
+        json.dumps(request),
+        {"Content-Type": "application/json"},
+    )
+    with connection.getresponse() as response:
+        assert response.status == 400
+        assert json.load(response)["detail"]
+
+
+@pytest.mark.parametrize("stream", [False, True])
+@pytest.mark.parametrize(
+    "reference_id,text",
+    [
+        ("0006_en_short", "Hello, today we are testing voice cloning."),
+        ("0152_zh_short", "你好，今天我们测试参考音频的声音克隆。"),
+    ],
+)
+def test_voice_clone(
+    connection: http.client.HTTPConnection,
+    tmp_path: Path,
+    stream: bool,
+    reference_id: str,
+    text: str,
+) -> None:
+    if not os.environ.get("CI_DATA_ROOT"):
+        pytest.skip("Set CI_DATA_ROOT to the provisioned corpus")
+    else:
+        reference = (
+            Path(os.environ["CI_DATA_ROOT"])
+            / "corpus"
+            / "v1"
+            / "clips"
+            / f"{reference_id}.wav"
+        ).read_bytes()
+    manifest = Path(__file__).parent / "corpus" / "manifest.jsonl"
+    reference_text = next(
+        clip["reference"]
+        for line in manifest.read_text().splitlines()
+        if (clip := json.loads(line))["id"] == reference_id
+    )
+    request = {
+        "model": "ming-omni-tts",
+        "input": text,
+        "ref_text": reference_text,
+        "ref_audio": "data:audio/wav;base64," + base64.b64encode(reference).decode(),
+        "response_format": "pcm" if stream else "wav",
+        "stream": stream,
+        "max_new_tokens": 40,
+    }
+    connection.request(
+        "POST",
+        "/v1/audio/speech",
+        json.dumps(request),
+        {"Content-Type": "application/json"},
+    )
+    with connection.getresponse() as response:
+        assert response.status == 200, response.read().decode(errors="replace")
+        assert response.getheader("Content-Type") == (
+            "audio/pcm" if stream else "audio/wav"
+        )
+        assert response.getheader("X-Sample-Rate") == "44100"
+        if stream:
+            assert response.getheader("Transfer-Encoding") == "chunked"
+        else:
+            pass
+        audio = response.read()
+    if stream:
+        with wave.open(str(tmp_path / "clone.wav"), "wb") as waveform:
+            waveform.setparams((1, 2, 44100, 0, "NONE", "not compressed"))
+            waveform.writeframes(audio)
+    else:
+        (tmp_path / "clone.wav").write_bytes(audio)
+        with wave.open(io.BytesIO(audio)) as waveform:
+            assert (
+                waveform.getframerate(),
+                waveform.getnchannels(),
+                waveform.getsampwidth(),
+            ) == (44100, 1, 2)
+            audio = waveform.readframes(waveform.getnframes())
+    assert len(audio) > 0 and len(audio) % 2 == 0
+    assert np.any(np.frombuffer(audio, dtype="<i2"))
+    connection.close()
+
+
+@pytest.mark.parametrize(
+    "stream,wait_for_audio", [(False, False), (True, False), (True, True)]
+)
+def test_disconnect_releases_request(
+    connection: http.client.HTTPConnection, stream: bool, wait_for_audio: bool
+) -> None:
     request = {
         "model": "ming-omni-tts",
         "input": "今天我们测试原生语音服务。" * 8,
-        "stream": True,
+        "stream": stream,
         "response_format": "pcm",
         "max_new_tokens": 100,
     }
@@ -346,9 +461,28 @@ def test_disconnect_releases_request(connection: http.client.HTTPConnection) -> 
         json.dumps(request),
         {"Content-Type": "application/json"},
     )
-    with connection.getresponse() as response:
-        assert response.status == 200
-        assert response.read(2)
+    if wait_for_audio:
+        with connection.getresponse() as response:
+            assert response.status == 200
+            assert response.read(2)
+    else:
+        health = http.client.HTTPConnection(
+            connection.host, connection.port, timeout=10
+        )
+        try:
+            deadline = time.monotonic() + 10
+            while True:
+                health.request("GET", "/health")
+                with health.getresponse() as response:
+                    assert response.status == 200
+                    states = json.load(response)["request_states"]
+                if states.get("running") == 1:
+                    break
+                else:
+                    assert time.monotonic() < deadline, "Request was not admitted"
+                    time.sleep(0.01)
+        finally:
+            health.close()
     connection.close()
     request.update(input="你好。", max_new_tokens=1)
     deadline = time.monotonic() + 60

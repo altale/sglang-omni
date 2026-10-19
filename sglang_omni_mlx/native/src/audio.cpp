@@ -12,6 +12,30 @@ namespace qwen3_asr {
 
 namespace mx = mlx::core;
 
+std::string EncodeWavPcm16(std::string_view pcm_bytes, int sample_rate,
+                           int channels) {
+  std::string wav;
+  const auto append = [&](uint32_t value, int bytes) {
+    for (int i = 0; i < bytes; ++i) {
+      wav.push_back(static_cast<char>((value >> (8 * i)) & 0xff));
+    }
+  };
+  wav += "RIFF";
+  append(36 + pcm_bytes.size(), 4);
+  wav += "WAVEfmt ";
+  append(16, 4);
+  append(1, 2);
+  append(channels, 2);
+  append(sample_rate, 4);
+  append(sample_rate * channels * 2, 4);
+  append(channels * 2, 2);
+  append(16, 2);
+  wav += "data";
+  append(pcm_bytes.size(), 4);
+  wav += pcm_bytes;
+  return wav;
+}
+
 namespace {
 
 constexpr float kLogMelFloor = 1e-10f;

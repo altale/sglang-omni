@@ -234,4 +234,109 @@ mx::array MingAudioDecoder::DecodeChunk(const mx::array &latents,
   return waveform;
 }
 
+MingAudioEncoder::MingAudioEncoder(const std::filesystem::path &directory)
+    : MingAudioEncoder(qwen3_asr::ReadJson(directory / "config.json"),
+                       directory) {}
+
+MingAudioEncoder::MingAudioEncoder(const nlohmann::json &config,
+                                   const std::filesystem::path &directory)
+    : patch_size_(config.at("audio_tokenizer_config").at("patch_size")),
+      hop_length_(config.at("audio_tokenizer_config")
+                      .at("enc_kwargs")
+                      .value("hop_size", 320)),
+      input_dim_(
+          config.at("audio_tokenizer_config").at("enc_kwargs").at("input_dim")),
+      latent_dim_(config.at("audio_tokenizer_config")
+                      .at("enc_kwargs")
+                      .at("latent_dim")),
+      checkpoint_(
+          [&] {
+            const auto &audio = config.at("audio_tokenizer_config");
+            if (audio.at("sample_rate") != 44100 ||
+                std::min({hop_length_, input_dim_, latent_dim_}) <= 0 ||
+                (patch_size_ != -1 && patch_size_ < 1) ||
+                !audio.value("semantic_module_kwargs", nlohmann::json())
+                     .is_null()) {
+              throw std::invalid_argument(
+                  "unsupported Ming AudioVAE encoder configuration");
+            } else {
+              return LoadComponentWeights(directory, {"audio.encoder."});
+            }
+          }(),
+          config),
+      transformer_(
+          checkpoint_, "audio.encoder.encoder",
+          config.at("audio_tokenizer_config").at("enc_kwargs").at("backbone")) {
+  const int hidden = transformer_.hidden_size();
+  RequireShape(checkpoint_, "audio.encoder.fc1.weight", {hidden, input_dim_});
+  RequireShape(checkpoint_, "audio.encoder.fc2.weight", {hidden, hidden});
+  RequireShape(checkpoint_, "audio.encoder.fc2.bias", {hidden});
+  RequireShape(checkpoint_, "audio.encoder.fc3.weight",
+               {2 * latent_dim_, hidden});
+  RequireShape(checkpoint_, "audio.encoder.fc3.bias", {2 * latent_dim_});
+  if (patch_size_ != -1) {
+    auto backbone =
+        config.at("audio_tokenizer_config").at("enc_kwargs").at("backbone");
+    backbone["num_hidden_layers"] = 4;
+    if (!backbone.value("layer_types", nlohmann::json()).is_null()) {
+      auto kinds = backbone.at("layer_types").get<std::vector<std::string>>();
+      kinds.resize(std::min<size_t>(4, kinds.size()));
+      backbone["layer_types"] = kinds;
+    } else {
+    }
+    aggregator_.emplace(checkpoint_, "audio.encoder.aggregator", backbone);
+    RequireShape(checkpoint_, "audio.encoder.cls_embed", {1, 1, hidden});
+  } else {
+  }
+}
+
+mx::array MingAudioEncoder::Encode(const mx::array &waveform) const {
+  assert(waveform.ndim() == 2 && waveform.size() > 0);
+  const int batch = waveform.shape(0), length = waveform.shape(1);
+  const int count = (length + hop_length_ - 1) / hop_length_;
+  const int needed = (count - 1) * hop_length_ + input_dim_;
+  const mx::array padded =
+      mx::pad(waveform, {{0, 0}, {0, std::max(0, needed - length)}});
+  const mx::array indices =
+      mx::add(mx::multiply(mx::reshape(mx::arange(count), {-1, 1}),
+                           mx::array(hop_length_)),
+              mx::arange(input_dim_));
+  const mx::array frames = mx::take(padded, indices, 1);
+  auto caches = transformer_.NewCaches();
+  mx::array hidden = transformer_.Forward(
+      checkpoint_.Linear(
+          checkpoint_.Linear(
+              mx::astype(frames, WeightDtype(checkpoint_, "audio.encoder.fc1")),
+              "audio.encoder.fc1"),
+          "audio.encoder.fc2"),
+      caches);
+  if (aggregator_) {
+    const int padding =
+        (patch_size_ - hidden.shape(1) % patch_size_) % patch_size_;
+    hidden = mx::reshape(mx::pad(hidden, {{0, 0}, {0, padding}, {0, 0}}),
+                         {-1, patch_size_, transformer_.hidden_size()});
+    const mx::array cls = mx::astype(
+        mx::broadcast_to(checkpoint_.Weight("audio.encoder.cls_embed"),
+                         {hidden.shape(0), 1, transformer_.hidden_size()}),
+        hidden.dtype());
+    hidden = mx::reshape(mx::concatenate({hidden, cls}, 1),
+                         {batch, -1, transformer_.hidden_size()});
+    auto aggregate_caches = aggregator_->NewCaches();
+    hidden =
+        mx::reshape(aggregator_->Forward(hidden, aggregate_caches),
+                    {batch, -1, patch_size_ + 1, transformer_.hidden_size()});
+    hidden = mx::squeeze(
+        mx::slice(hidden, {0, 0, patch_size_, 0}, hidden.shape()), 2);
+  } else {
+  }
+  const auto posterior =
+      mx::split(checkpoint_.Linear(hidden, "audio.encoder.fc3"), 2, -1);
+  const mx::array random =
+      mx::random::normal(posterior[0].shape(), posterior[0].dtype());
+  const mx::array deviation =
+      mx::add(mx::logaddexp(posterior[1], mx::array(0, posterior[1].dtype())),
+              mx::array(1e-4f, posterior[1].dtype()));
+  return mx::add(posterior[0], mx::multiply(deviation, random));
+}
+
 } // namespace ming_tts

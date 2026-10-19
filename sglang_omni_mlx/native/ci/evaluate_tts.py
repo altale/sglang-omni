@@ -3,6 +3,8 @@
 
 import argparse
 import asyncio
+import base64
+import io
 import json
 import logging
 import os
@@ -20,14 +22,54 @@ import torchaudio
 from huggingface_hub import snapshot_download
 
 from benchmarks.benchmarker.utils import STARTUP_TIMEOUT, stop_server, wait_healthy
+from benchmarks.dataset.seedtts import SampleInput, load_seedtts_samples
 from benchmarks.eval.benchmark_tts_seedtts import (
     TtsSeedttsBenchmarkConfig,
-    benchmark,
+    run_tts_seedtts_benchmark,
     run_tts_seedtts_transcribe,
 )
+from benchmarks.metrics.performance import print_speed_summary
 
 logger = logging.getLogger(__name__)
 ASR_SAMPLE_RATE = 16000
+REFERENCE_SAMPLE_RATE = 16000
+
+
+def prepare_reference_samples(config: TtsSeedttsBenchmarkConfig) -> list[SampleInput]:
+    if config.sample_offset < 0:
+        raise ValueError("--sample-offset must be nonnegative")
+    else:
+        pass
+    limit = (
+        config.sample_offset + config.max_samples
+        if config.max_samples is not None
+        else None
+    )
+    samples = load_seedtts_samples(config.meta, limit, split=config.lang)[
+        config.sample_offset :
+    ]
+    prepared = []
+    for sample in samples:
+        audio_samples, sample_rate = sf.read(
+            sample.ref_audio, dtype="float32", always_2d=True
+        )
+        waveform = torch.from_numpy(audio_samples).mean(dim=1)
+        waveform = torchaudio.functional.resample(
+            waveform, sample_rate, REFERENCE_SAMPLE_RATE
+        )
+        with io.BytesIO() as buffer:
+            sf.write(
+                buffer,
+                waveform.numpy(),
+                REFERENCE_SAMPLE_RATE,
+                format="WAV",
+                subtype="PCM_16",
+            )
+            reference_url = "data:audio/wav;base64," + base64.b64encode(
+                buffer.getvalue()
+            ).decode("ascii")
+        prepared.append(replace(sample, ref_audio=reference_url))
+    return prepared
 
 
 def prepare_asr_audio(config: TtsSeedttsBenchmarkConfig) -> TtsSeedttsBenchmarkConfig:
@@ -138,6 +180,11 @@ def main() -> None:
     parser.add_argument("--max-new-tokens", type=int, default=256)
     parser.add_argument("--warmup", type=int, default=1)
     parser.add_argument("--stream", action="store_true")
+    parser.add_argument(
+        "--voice-clone",
+        action="store_true",
+        help="Condition generation on the SeedTTS reference audio and transcript.",
+    )
     parser.add_argument("--port", type=int, default=8000)
     parser.add_argument("--server-timeout", type=int, default=STARTUP_TIMEOUT)
     parser.add_argument("--output-dir", required=True)
@@ -180,13 +227,14 @@ def main() -> None:
         stream=arguments.stream,
         response_format="pcm" if arguments.stream else "wav",
         output_dir=arguments.output_dir,
-        voice_clone=False,
+        voice_clone=arguments.voice_clone,
         concurrency=1,
         asr_concurrency=1,
         collect_stream_outcomes=False,
     )
     log_directory = Path(config.output_dir) / "server_logs"
     if not arguments.transcribe_only:
+        samples = prepare_reference_samples(config) if config.voice_clone else None
         with managed_native_server(
             binary=arguments.runtime_bin / "ming_tts_server",
             model_path=config.model,
@@ -196,7 +244,10 @@ def main() -> None:
             log_file=log_directory / "tts_server.log",
             timeout_seconds=arguments.server_timeout,
         ):
-            asyncio.run(benchmark(config))
+            results = asyncio.run(run_tts_seedtts_benchmark(config, samples=samples))
+            print_speed_summary(
+                results["summary"], config.model, concurrency=config.concurrency
+            )
     else:
         pass
     if not arguments.generate_only:

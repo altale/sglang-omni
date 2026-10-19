@@ -3,6 +3,7 @@
 #pragma once
 
 #include <cstdint>
+#include <string>
 #include <string_view>
 #include <vector>
 
@@ -26,6 +27,9 @@ enum class AudioLayout { kReference, kVoxtSwift };
 // 16 kHz mono PCM16 or float32 WAV to float32 samples; throws
 // std::invalid_argument for anything else.
 std::vector<float> DecodeWav(std::string_view wav_bytes);
+
+std::string EncodeWavPcm16(std::string_view pcm_bytes, int sample_rate,
+                           int channels);
 
 // Slaney-scale, Slaney-normalized filters [frequency_bins, mel_bins], built in
 // float32 in the same order as Voxt's Swift front end.

@@ -1,6 +1,8 @@
 # SPDX-License-Identifier: Apache-2.0
 """Native TTS evaluation: audio preparation and port reuse."""
 
+import base64
+import io
 import json
 import socket
 import wave
@@ -12,6 +14,50 @@ import pytest
 
 from benchmarks.eval import benchmark_tts_seedtts as tts
 from sglang_omni_mlx.native.ci import evaluate_tts as native_tts
+
+
+@pytest.mark.parametrize(
+    "sample_rate, channel_count", [(16000, 1), (44100, 1), (48000, 2)]
+)
+def test_native_reference_audio_preparation(
+    tmp_path: Path, sample_rate: int, channel_count: int
+) -> None:
+    reference_path = tmp_path / "reference.wav"
+    channel_samples = [8192] if channel_count == 1 else [8192, 24576]
+    with wave.open(str(reference_path), "wb") as waveform:
+        waveform.setparams((channel_count, 2, sample_rate, 0, "NONE", "not compressed"))
+        waveform.writeframes(
+            array("h", channel_samples * (sample_rate // 10)).tobytes()
+        )
+    original_bytes = reference_path.read_bytes()
+    metadata_path = tmp_path / "meta.lst"
+    metadata_path.write_text(
+        "first|参考一|reference.wav|目标一\n"
+        "second|参考二|reference.wav|目标二\n"
+        "third|参考三|reference.wav|目标三\n"
+    )
+    config = tts.TtsSeedttsBenchmarkConfig(
+        model="test/ming",
+        meta=str(metadata_path),
+        voice_clone=True,
+        sample_offset=1,
+        max_samples=1,
+    )
+    samples = native_tts.prepare_reference_samples(config)
+    assert len(samples) == 1
+    assert (samples[0].sample_id, samples[0].ref_text, samples[0].target_text) == (
+        "second",
+        "参考二",
+        "目标二",
+    )
+    prefix, encoded = samples[0].ref_audio.split(",", 1)
+    assert prefix == "data:audio/wav;base64"
+    with wave.open(io.BytesIO(base64.b64decode(encoded, validate=True))) as waveform:
+        assert waveform.getparams()[:4] == (1, 2, 16000, 1600)
+        pcm16 = array("h", waveform.readframes(waveform.getnframes()))
+    expected_amplitude = sum(channel_samples) / channel_count
+    assert pcm16[100:-100] == pytest.approx([expected_amplitude] * 1400, rel=0.001)
+    assert reference_path.read_bytes() == original_bytes
 
 
 @pytest.mark.parametrize(

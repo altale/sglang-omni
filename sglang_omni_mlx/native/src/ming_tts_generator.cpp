@@ -46,7 +46,8 @@ bool HasText(const std::string &text) {
 MingFrontend::MingFrontend(const std::filesystem::path &directory)
     : tokenizer_(qwen3_asr::Tokenizer::FromJson(
           qwen3_asr::ReadJson(directory / "tokenizer.json"))) {
-  for (const auto *token : {"<role>", "</role>", "<audio>", "<|endoftext|>"}) {
+  for (const auto *token : {"<role>", "</role>", "<audio>", "<|endoftext|>",
+                            "<spk>", "</spk>", "<audioPatch>"}) {
     const int id = tokenizer_.AddedTokenId(token);
     if (id < 0) {
       throw std::invalid_argument(std::string("missing Ming special token: ") +
@@ -56,15 +57,21 @@ MingFrontend::MingFrontend(const std::filesystem::path &directory)
   }
 }
 
-std::vector<int>
-MingFrontend::BuildPrompt(const std::string &text,
-                          const std::string &description,
-                          const std::string &instructions) const {
+Prompt MingFrontend::BuildPrompt(const std::string &text,
+                                 const std::string &description,
+                                 const std::string &instructions,
+                                 const std::string &reference_text,
+                                 int reference_tokens) const {
   if (!HasText(text)) {
     throw std::invalid_argument("input must be nonempty");
   } else {
   }
-  std::vector<int> input_ids;
+  if (reference_tokens > 0 && !HasText(reference_text)) {
+    throw std::invalid_argument("ref_text must be nonempty");
+  } else {
+  }
+  Prompt prompt;
+  auto &input_ids = prompt.input_ids;
   const auto append = [&](const std::string &part) {
     const auto tokens = tokenizer_.Encode(part);
     input_ids.insert(input_ids.end(), tokens.begin(), tokens.end());
@@ -73,6 +80,13 @@ MingFrontend::BuildPrompt(const std::string &text,
   append(description.empty()
              ? "Please generate speech based on the following description.\n"
              : description);
+  if (reference_tokens > 0) {
+    append("  speaker_1:<spk>");
+    prompt.speaker_position = static_cast<int>(input_ids.size());
+    input_ids.push_back(tokenizer_.AddedTokenId("<audioPatch>"));
+    append("</spk>\n");
+  } else {
+  }
   constexpr std::array markers{
       "Genre: ", "Mood: ", "Instrument: ", "Theme: ", "Duration: "};
   if (!std::all_of(markers.begin(), markers.end(), [&](const auto *marker) {
@@ -81,6 +95,7 @@ MingFrontend::BuildPrompt(const std::string &text,
     append(" Text input:\n");
   } else {
   }
+  append(reference_text);
   append(text);
   append("<role>ASSISTANT</role>");
   if (!instructions.empty()) {
@@ -89,14 +104,22 @@ MingFrontend::BuildPrompt(const std::string &text,
   } else {
   }
   input_ids.push_back(tokenizer_.AddedTokenId("<audio>"));
-  return input_ids;
+  if (reference_tokens > 0) {
+    prompt.reference_start = static_cast<int>(input_ids.size());
+    input_ids.insert(input_ids.end(), reference_tokens,
+                     tokenizer_.AddedTokenId("<audioPatch>"));
+  } else {
+  }
+  return prompt;
 }
 
 MingGenerator::MingGenerator(const std::filesystem::path &directory)
     : backbone_(directory), acoustic_(directory) {}
 
-GenerationState MingGenerator::Start(const std::vector<int> &input_ids,
-                                     int max_steps) const {
+GenerationState MingGenerator::Start(
+    const Prompt &prompt, int max_steps,
+    const std::optional<ReferenceConditioning> &reference) const {
+  const auto &input_ids = prompt.input_ids;
   assert(!input_ids.empty() && max_steps > 0);
   const auto &config = backbone_.config();
   if (input_ids.size() + max_steps - 1 >
@@ -112,6 +135,34 @@ GenerationState MingGenerator::Start(const std::vector<int> &input_ids,
       backbone_.EmbedTokens(mx::array(input_ids.data(), {1, token_count}));
   mx::array history = mx::zeros(
       {1, acoustic_.history_frames(), acoustic_.latent_dim()}, mx::float32);
+  if (reference) {
+    const auto &latents = reference->latents;
+    const int frames = latents.shape(1);
+    assert(
+        latents.shape(0) == 1 && latents.shape(2) == acoustic_.latent_dim() &&
+        frames % acoustic_.patch_size() == 0 && prompt.speaker_position >= 0);
+    const int patches = frames / acoustic_.patch_size();
+    assert(prompt.reference_start + patches == token_count);
+    embeddings = mx::slice_update(
+        embeddings,
+        mx::astype(
+            mx::expand_dims(acoustic_.ProjectSpeaker(reference->speaker), 1),
+            embeddings.dtype()),
+        {0, prompt.speaker_position, 0},
+        {1, prompt.speaker_position + 1, config.hidden_size});
+    const auto projected = acoustic_.Aggregate(mx::reshape(
+        latents, {patches, acoustic_.patch_size(), acoustic_.latent_dim()}));
+    embeddings = mx::slice_update(
+        embeddings,
+        mx::astype(mx::reshape(projected, {1, patches, config.hidden_size}),
+                   embeddings.dtype()),
+        {0, prompt.reference_start, 0}, {1, token_count, config.hidden_size});
+    const int kept = std::min(frames, acoustic_.history_frames());
+    history = mx::slice_update(
+        history, mx::slice(latents, {0, frames - kept, 0}, latents.shape()),
+        {0, acoustic_.history_frames() - kept, 0}, history.shape());
+  } else {
+  }
   auto caches = backbone_.NewCaches();
   const mx::array positions =
       mx::broadcast_to(mx::arange(token_count), {3, 1, token_count});

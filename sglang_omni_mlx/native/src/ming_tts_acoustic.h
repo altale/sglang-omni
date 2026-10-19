@@ -33,9 +33,10 @@ public:
   int patch_size() const { return patch_size_; }
   int history_frames() const { return history_frames_; }
   int latent_dim() const { return latent_dim_; }
+  mlx::core::array Aggregate(const mlx::core::array &latents) const;
+  mlx::core::array ProjectSpeaker(const mlx::core::array &speaker) const;
 
 private:
-  mlx::core::array Aggregate(const mlx::core::array &latents) const;
   MingAcoustic(const nlohmann::json &config,
                const std::filesystem::path &directory);
   mlx::core::array Blocks(mlx::core::array hidden, const AcousticConfig &config,

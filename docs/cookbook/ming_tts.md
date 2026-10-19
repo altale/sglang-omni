@@ -77,9 +77,44 @@ For native supervisor integration, launch with `--supervised --model-kind ming_t
 --model-directory "$MING_MODEL_DIR"`. The shared native server defaults to a free
 port and a generated model name; pass `--port` and `--model-name` to fix them.
 Supervised mode reports them in a JSON `ready` event on stdout. Send `{"command":"shutdown"}`
-on stdin to stop; closing stdin also stops the process. The native server does not
-support reference audio or voice cloning and rejects reference-audio request
-fields. Voice cloning remains available through the CUDA pipeline.
+on stdin to stop. Closing stdin also stops the process.
+
+Native voice cloning accepts one inline `data:audio/wav;base64,...` reference in
+`ref_audio`, together with its transcript in `ref_text`. The WAV must be mono
+16 kHz PCM16 or float32 and contain 0.1–30 seconds of audio. Request bodies are
+limited to 4 MiB. Both non-streaming WAV/PCM and streaming PCM are supported.
+CampPlus and AudioVAE reference encoding run in C++ MLX and are loaded on the
+first reference request. Later requests reuse the encoder weights.
+
+Voice cloning requires `campplus.safetensors` in the model directory. The Q4
+checkpoint includes it. The official BF16 checkpoint instead includes ONNX
+weights, which the native server does not read. For BF16, place a copy of the Q4
+checkpoint's `campplus.safetensors` alongside the model files. Its FP32 tensors
+are identical to the official CampPlus ONNX initializers.
+
+With the native server running, send a reference clip and its transcript:
+
+```bash
+export MING_REFERENCE_WAV=/path/to/reference-16k-mono.wav
+export MING_REFERENCE_TEXT='The exact words spoken in the reference clip.'
+python - <<'PY' | curl --fail-with-body http://127.0.0.1:8000/v1/audio/speech \
+  -H 'Content-Type: application/json' --data-binary @- --output cloned.wav
+import base64
+import json
+import os
+from pathlib import Path
+
+print(json.dumps({
+    "model": "ming-omni-tts",
+    "input": "Hello, this is a test of reference-conditioned speech.",
+    "ref_text": os.environ["MING_REFERENCE_TEXT"],
+    "ref_audio": "data:audio/wav;base64," + base64.b64encode(
+        Path(os.environ["MING_REFERENCE_WAV"]).read_bytes()
+    ).decode(),
+    "response_format": "wav",
+}))
+PY
+```
 
 For 4-bit inference, download the MLX community checkpoint and use its local
 directory as `--model-path`. Quantization is read from the checkpoint; there is
@@ -289,14 +324,20 @@ save to `stream/zh` or `stream/en`. This is a 50-sample smoke evaluation; omit
 `--max-samples` for the full splits. `--generate-only` and `--transcribe-only` still
 support running either phase separately.
 
+For voice cloning, add `--voice-clone` and use a separate output directory. The
+evaluator converts each SeedTTS reference to a 16 kHz mono PCM16 data URL before
+timing generation, preserving the reference transcript and original audio files.
+The model directory must contain `campplus.safetensors`. Both streaming and
+non-streaming evaluation are supported. Keep `--voice-clone` when running
+`--transcribe-only` so the WER result records the correct input mode.
+
 The evaluator prepares 16 kHz mono copies for native ASR under `asr/`, preserving
 the original WAVs and `generated.json`. Scoring results are saved to
 `asr/wer_results.json` and `asr/asr_speed_results.json`.
 Report EN WER / ZH CER together with generation and ASR
 failure counts; failed samples must not be hidden by the error-rate average.
 These are measured quality results, not PCM golden comparisons or calibrated
-Apple-specific CI thresholds. Speaker similarity is not evaluated without
-reference-audio support.
+Apple-specific CI thresholds. Speaker similarity is not evaluated.
 
 ## Benchmark Results
 
