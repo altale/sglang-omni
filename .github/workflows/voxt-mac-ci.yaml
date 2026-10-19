@@ -80,15 +80,14 @@ jobs:
         with:
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
 
-      # Checkpoints, corpus and builds need about 14 GB under VOXT_CI_ROOT and
-      # the runner's work directory; say so plainly instead of failing midway.
+      # Note (altale): Ming Q4 adds about 10 GB to the native CI checkpoint cache.
       - name: Check free disk space
         run: |
           mkdir -p "$VOXT_CI_ROOT"
           free_gb=$(df -g "$VOXT_CI_ROOT" | awk 'NR == 2 {print $4}')
           echo "Free under $VOXT_CI_ROOT: ${free_gb} GB"
-          if [ "$free_gb" -lt 17 ]; then
-            echo "::error::Only ${free_gb} GB free on the runner; the Voxt Mac CI needs at least 17 GB."
+          if [ "$free_gb" -lt 27 ]; then
+            echo "::error::Only ${free_gb} GB free on the runner; the Voxt Mac CI needs at least 27 GB."
             exit 1
           else
             :
@@ -162,6 +161,15 @@ jobs:
           CI_DATA_ROOT: ${{ env.VOXT_CI_ROOT }}/data
         run: |
           "$VOXT_CI_ROOT/venv/bin/python" -m pytest -q sglang_omni_mlx/native/ci/test_model_servers.py
+
+      - name: Ming TTS API tests (Q4)
+        if: ${{ always() }}
+        env:
+          NATIVE_RUNTIME_BIN: ${{ runner.temp }}/runtime/bin
+          MING_MODEL_DIR: ${{ env.VOXT_CI_ROOT }}/data/models/mlx-community_Ming-omni-tts-16.8B-A3B-4bit
+        run: |
+          env -u MING_NATIVE_SERVER_URL "$VOXT_CI_ROOT/venv/bin/python" -m pytest -q -ra \
+            sglang_omni_mlx/native/ci/test_tts_api.py
 
   voxt-unit:
     name: Voxt Omni unit tests
