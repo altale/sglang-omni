@@ -8,7 +8,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" /><meta name="viewport" content="width=device-width, initial-scale=1" />
 
-    <title>🚀 Installation — Ascend NPU &#8212; SGLang</title>
+    <title>Installation — Ascend NPU &#8212; SGLang</title>
   
   
   
@@ -42,7 +42,7 @@
   <link rel="preload" as="script" href="../_static/scripts/bootstrap.js?digest=90905a2f556bf617f1a9" />
 <link rel="preload" as="script" href="../_static/scripts/pydata-sphinx-theme.js?digest=90905a2f556bf617f1a9" />
 
-    <script src="../_static/documentation_options.js?v=3476fdda"></script>
+    <script src="../_static/documentation_options.js?v=7ed07c24"></script>
     <script src="../_static/doctools.js?v=fd6eb6e6"></script>
     <script src="../_static/sphinx_highlight.js?v=6ffebe34"></script>
     <script src="../_static/clipboard.min.js?v=a7894cd8"></script>
@@ -56,12 +56,12 @@
     <link rel="icon" href="../_static/logo.ico"/>
     <link rel="index" title="Index" href="../genindex.html" />
     <link rel="search" title="Search" href="../search.html" />
-    <link rel="next" title="🚀 Installation — Intel XPU" href="installation_xpu.html" />
-    <link rel="prev" title="🚀 Installation" href="installation.html" />
+    <link rel="next" title="Installation — Intel XPU" href="installation_xpu.html" />
+    <link rel="prev" title="Installation — Apple Silicon" href="installation_apple_silicon.html" />
   <meta name="viewport" content="width=device-width, initial-scale=1"/>
   <meta name="docsearch:language" content="en"/>
-  <meta name="docsearch:version" content="0.1.7" />
-    <meta name="docbuild:last-update" content="Sep 29, 2026"/>
+  <meta name="docsearch:version" content="0.1.8" />
+    <meta name="docbuild:last-update" content="Oct 20, 2026"/>
   
     
     <script src="../_static/searchtools.js"></script>
@@ -206,17 +206,21 @@
     <div class="bd-toc-item navbar-nav active">
         <p aria-level="2" class="caption" role="heading"><span class="caption-text">Get Started</span></p>
 <ul class="current nav bd-sidenav">
-<li class="toctree-l1"><a class="reference internal" href="installation.html">🚀 Installation</a></li>
-<li class="toctree-l1 current active"><a class="current reference internal" href="#">🚀 Installation — Ascend NPU</a></li>
-<li class="toctree-l1"><a class="reference internal" href="installation_xpu.html">🚀 Installation — Intel XPU</a></li>
-<li class="toctree-l1"><a class="reference internal" href="installation_cpu.html">🚀 Installation — Intel CPU</a></li>
-<li class="toctree-l1"><a class="reference internal" href="installation_musa.html">🚀 Installation — MUSA</a></li>
+<li class="toctree-l1"><a class="reference internal" href="installation.html">Installation — CUDA</a></li>
+<li class="toctree-l1"><a class="reference internal" href="installation_apple_silicon.html">Installation — Apple Silicon</a></li>
+<li class="toctree-l1 current active"><a class="current reference internal" href="#">Installation — Ascend NPU</a></li>
+<li class="toctree-l1"><a class="reference internal" href="installation_xpu.html">Installation — Intel XPU</a></li>
+<li class="toctree-l1"><a class="reference internal" href="installation_cpu.html">Installation — Intel CPU</a></li>
+<li class="toctree-l1"><a class="reference internal" href="installation_musa.html">Installation — MUSA</a></li>
+<li class="toctree-l1"><a class="reference internal" href="troubleshooting.html">Troubleshooting</a></li>
 </ul>
 <p aria-level="2" class="caption" role="heading"><span class="caption-text">Cookbook</span></p>
 <ul class="nav bd-sidenav">
 <li class="toctree-l1"><a class="reference internal" href="../cookbook/higgs_tts.html">Higgs TTS</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../cookbook/nemotron_diarization.html">Nemotron 3 Diarization</a></li>
 <li class="toctree-l1"><a class="reference internal" href="../cookbook/voxtral_tts.html">Voxtral TTS</a></li>
 <li class="toctree-l1"><a class="reference internal" href="../cookbook/fishaudio_s2_pro.html">Fish Audio S2-Pro</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../cookbook/fishaudio_drama3.html">Fish Audio Drama 3</a></li>
 <li class="toctree-l1"><a class="reference internal" href="../cookbook/qwen3_tts.html">Qwen3 TTS</a></li>
 <li class="toctree-l1"><a class="reference internal" href="../cookbook/ming_tts.html">Ming-Omni-TTS</a></li>
 <li class="toctree-l1"><a class="reference internal" href="../cookbook/moss_tts.html">MOSS-TTS</a></li>
@@ -227,20 +231,26 @@
 <li class="toctree-l1"><a class="reference internal" href="../cookbook/qwen3_asr.html">Qwen3-ASR</a></li>
 <li class="toctree-l1"><a class="reference internal" href="../cookbook/fun_asr.html">Fun-ASR-Nano</a></li>
 <li class="toctree-l1"><a class="reference internal" href="../cookbook/arkasr.html">ARK-ASR-3B</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../cookbook/nemotron3_5_asr.html">Nemotron 3.5 ASR</a></li>
 <li class="toctree-l1"><a class="reference internal" href="../cookbook/moss_transcribe_diarize.html">MOSS-Transcribe-Diarize</a></li>
 <li class="toctree-l1"><a class="reference internal" href="../cookbook/whisper_asr.html">Whisper ASR</a></li>
 <li class="toctree-l1"><a class="reference internal" href="../cookbook/qwen3_omni.html">Qwen3-Omni</a></li>
-<li class="toctree-l1"><a class="reference internal" href="../cookbook/minicpm_o.html">MiniCPM-o Reference Audio</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../cookbook/minicpm_o.html">MiniCPM-o</a></li>
 <li class="toctree-l1"><a class="reference internal" href="../cookbook/ming_omni.html">Ming-Omni</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../cookbook/ming3_audio.html">Ming-3.0-audio-flash</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../cookbook/ming3_tts.html">Ming-3.0-TTS</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../cookbook/ming3_asr.html">Ming-3.0-asr-tiny</a></li>
 <li class="toctree-l1"><a class="reference internal" href="../cookbook/nemotron_voicechat.html">NemotronLabs VoiceChat</a></li>
 <li class="toctree-l1"><a class="reference internal" href="../cookbook/personaplex.html">PersonaPlex</a></li>
 <li class="toctree-l1"><a class="reference internal" href="../cookbook/llada2_uni.html">LLaDA2.0-Uni</a></li>
 <li class="toctree-l1"><a class="reference internal" href="../cookbook/fun_cosyvoice3.html">Fun-CosyVoice3</a></li>
 <li class="toctree-l1"><a class="reference internal" href="../cookbook/auk.html">AuK</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../cookbook/cosmos3_nano.html">Cosmos3 Nano serving</a></li>
 </ul>
 <p aria-level="2" class="caption" role="heading"><span class="caption-text">General Usage</span></p>
 <ul class="nav bd-sidenav">
 <li class="toctree-l1"><a class="reference internal" href="../basic_usage/qwen3_omni.html">Omni Model Usage</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../basic_usage/native_chat_stage.html">Native Chat Stage</a></li>
 <li class="toctree-l1"><a class="reference internal" href="../basic_usage/audio_translations.html">Audio Translations</a></li>
 <li class="toctree-l1"><a class="reference internal" href="../basic_usage/tts.html">TTS Model Usage</a></li>
 <li class="toctree-l1"><a class="reference internal" href="../basic_usage/process_topology.html">Process Topology, Replicas, and GPU Sharing</a></li>
@@ -248,24 +258,28 @@
 <li class="toctree-l1"><a class="reference internal" href="../basic_usage/process_topology_migration.html">Process Topology Migration</a></li>
 <li class="toctree-l1"><a class="reference internal" href="../basic_usage/omni_router.html">SGLang-Omni Rust Router</a></li>
 <li class="toctree-l1"><a class="reference internal" href="../basic_usage/mps_dp.html">Same-GPU Data Parallelism with CUDA MPS</a></li>
-</ul>
-<p aria-level="2" class="caption" role="heading"><span class="caption-text">Benchmarks</span></p>
-<ul class="nav bd-sidenav">
-<li class="toctree-l1"><a class="reference internal" href="../benchmarks/relay.html">Benchmark Relay</a></li>
-<li class="toctree-l1"><a class="reference internal" href="../benchmarks/qwen3_tts_leading_silence.html">Qwen3-TTS Base: Leading Silence in X-Vector Voice Cloning</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../basic_usage/native_media_routes.html">Native Media Routes</a></li>
 </ul>
 <p aria-level="2" class="caption" role="heading"><span class="caption-text">Developer Reference</span></p>
 <ul class="nav bd-sidenav">
 <li class="toctree-l1"><a class="reference internal" href="../developer_reference/main.html">Architecture</a></li>
 <li class="toctree-l1"><a class="reference internal" href="../developer_reference/apiserver_design.html">API Server Design</a></li>
 <li class="toctree-l1"><a class="reference internal" href="../developer_reference/pipeline.html">Pipeline Overview</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../developer_reference/full_duplex_interactive_model.html">Full Duplex Interactive Model</a></li>
 <li class="toctree-l1"><a class="reference internal" href="../developer_reference/config.html">Config</a></li>
 <li class="toctree-l1"><a class="reference internal" href="../developer_reference/adding_parameters.html">Adding a Parameter</a></li>
 <li class="toctree-l1"><a class="reference internal" href="../developer_reference/communication.html">Communication</a></li>
 <li class="toctree-l1"><a class="reference internal" href="../developer_reference/reference_encode_service.html">Reference Encode Service</a></li>
 <li class="toctree-l1"><a class="reference internal" href="../developer_reference/profiler.html">Request-level profiler</a></li>
 <li class="toctree-l1"><a class="reference internal" href="../developer_reference/qwen3_asr_concurrency_profile.html">Qwen3-ASR High-Concurrency Benchmark and Bottleneck Profile</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../developer_reference/full_duplex_bench.html">Full-Duplex-Bench runbook</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../developer_reference/full_duplex_metrics.html">Full-Duplex-Bench v1.0 unified metrics</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../developer_reference/tts_bench.html">TTS benchmark runbook</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../developer_reference/asr_bench.html">ASR benchmark runbook</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../developer_reference/omni_offline_bench.html">MiniCPM-o offline benchmark runbook</a></li>
 <li class="toctree-l1"><a class="reference internal" href="../developer_reference/rl_admin_control.html">RL Admin Control</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../developer_reference/mlx.html">MLX Path</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../developer_reference/ci_labels.html">CI Workflows and Labels</a></li>
 <li class="toctree-l1"><a class="reference internal" href="../developer_reference/bump_version.html">Bumping the SGLang Pin</a></li>
 </ul>
 
@@ -490,7 +504,7 @@
               
 
 <div id="jb-print-docs-body" class="onlyprint">
-    <h1>🚀 Installation — Ascend NPU</h1>
+    <h1>Installation — Ascend NPU</h1>
     <!-- Table of contents -->
     <div id="print-main-content">
         <div id="jb-print-toc">
@@ -524,7 +538,7 @@
                 <article class="bd-article">
                   
   <section class="tex2jax_ignore mathjax_ignore" id="installation-ascend-npu">
-<h1>🚀 Installation — Ascend NPU<a class="headerlink" href="#installation-ascend-npu" title="Link to this heading">#</a></h1>
+<h1>Installation — Ascend NPU<a class="headerlink" href="#installation-ascend-npu" title="Link to this heading">#</a></h1>
 <section id="prerequisites">
 <h2>Prerequisites<a class="headerlink" href="#prerequisites" title="Link to this heading">#</a></h2>
 <p>Both installation methods require Ascend host drivers and firmware compatible
@@ -548,25 +562,27 @@ Model support on NPU and optional dependencies must be checked separately.</p>
 <h3>A3 image installation<a class="headerlink" href="#a3-image-installation" title="Link to this heading">#</a></h3>
 <p>Use an ARM64 Linux host with Docker and Ascend A3 devices.</p>
 <p><strong>1. Pull the image</strong></p>
-<p>Pull the image matching your hardware from
-<a class="reference external" href="https://hub.docker.com/r/lmsysorg/sglang-omni/tags">Docker Hub</a>:</p>
+<p>Pull the image matching your hardware from Huawei Cloud SWR:</p>
 <ul class="simple">
 <li><p><strong>Release:</strong> use <code class="docutils literal notranslate"><span class="pre">v&lt;version&gt;-cann9.0.0-a3</span></code> for deployments, replacing
-<code class="docutils literal notranslate"><span class="pre">v&lt;version&gt;</span></code> with a published version tag from Docker Hub.</p></li>
+<code class="docutils literal notranslate"><span class="pre">v&lt;version&gt;</span></code> with a published version tag.</p></li>
 <li><p><strong>Development:</strong> use <code class="docutils literal notranslate"><span class="pre">main-cann9.0.0-a3</span></code> for the latest published development
 build. Scheduled or manual publications update this rolling tag.</p></li>
 </ul>
 <div class="highlight-bash notranslate"><div class="highlight"><pre><span></span><span class="c1"># Release (replace v&lt;version&gt; with a published version):</span>
-<span class="c1"># IMAGE=lmsysorg/sglang-omni:v&lt;version&gt;-cann9.0.0-a3</span>
+<span class="c1"># IMAGE=swr.cn-southwest-2.myhuaweicloud.com/base_image/dockerhub/lmsysorg/sglang-omni:v&lt;version&gt;-cann9.0.0-a3</span>
 
 <span class="c1"># Development (A3):</span>
-<span class="nv">IMAGE</span><span class="o">=</span>lmsysorg/sglang-omni:main-cann9.0.0-a3
+<span class="nv">IMAGE</span><span class="o">=</span>swr.cn-southwest-2.myhuaweicloud.com/base_image/dockerhub/lmsysorg/sglang-omni:main-cann9.0.0-a3
 
 docker<span class="w"> </span>pull<span class="w"> </span><span class="s2">"</span><span class="nv">$IMAGE</span><span class="s2">"</span>
 </pre></div>
 </div>
 <p>For reproducible deployments, set <code class="docutils literal notranslate"><span class="pre">IMAGE</span></code> to
-<code class="docutils literal notranslate"><span class="pre">lmsysorg/sglang-omni&#64;sha256:&lt;digest&gt;</span></code>.</p>
+<code class="docutils literal notranslate"><span class="pre">swr.cn-southwest-2.myhuaweicloud.com/base_image/dockerhub/lmsysorg/sglang-omni&#64;sha256:&lt;digest&gt;</span></code>.</p>
+<p>If authentication is required, run
+<code class="docutils literal notranslate"><span class="pre">docker</span> <span class="pre">login</span> <span class="pre">swr.cn-southwest-2.myhuaweicloud.com</span></code> with credentials supplied
+by the registry administrator before pulling.</p>
 <p><strong>2. Start the container</strong></p>
 <p>Download your model weights into a host directory and mount it into the
 container. The example exposes device 0; adjust device IDs and driver paths
@@ -601,16 +617,16 @@ relative to the visible devices (<code class="docutils literal notranslate"><spa
 <p>Use <code class="docutils literal notranslate"><span class="pre">v&lt;version&gt;-cann9.0.0-910b</span></code> for a release, or
 <code class="docutils literal notranslate"><span class="pre">main-cann9.0.0-910b</span></code> for the latest published development build.</p>
 <div class="highlight-bash notranslate"><div class="highlight"><pre><span></span><span class="c1"># Release (replace v&lt;version&gt; with a published version):</span>
-<span class="c1"># IMAGE=lmsysorg/sglang-omni:v&lt;version&gt;-cann9.0.0-910b</span>
+<span class="c1"># IMAGE=swr.cn-southwest-2.myhuaweicloud.com/base_image/dockerhub/lmsysorg/sglang-omni:v&lt;version&gt;-cann9.0.0-910b</span>
 
 <span class="c1"># Development (A2 / 910B):</span>
-<span class="nv">IMAGE</span><span class="o">=</span>lmsysorg/sglang-omni:main-cann9.0.0-910b
+<span class="nv">IMAGE</span><span class="o">=</span>swr.cn-southwest-2.myhuaweicloud.com/base_image/dockerhub/lmsysorg/sglang-omni:main-cann9.0.0-910b
 
 docker<span class="w"> </span>pull<span class="w"> </span><span class="s2">"</span><span class="nv">$IMAGE</span><span class="s2">"</span>
 </pre></div>
 </div>
 <p>For reproducible deployments, set <code class="docutils literal notranslate"><span class="pre">IMAGE</span></code> to
-<code class="docutils literal notranslate"><span class="pre">lmsysorg/sglang-omni&#64;sha256:&lt;digest&gt;</span></code>.</p>
+<code class="docutils literal notranslate"><span class="pre">swr.cn-southwest-2.myhuaweicloud.com/base_image/dockerhub/lmsysorg/sglang-omni&#64;sha256:&lt;digest&gt;</span></code>.</p>
 <p><strong>2. Start the container</strong></p>
 <p>Set <code class="docutils literal notranslate"><span class="pre">MODEL_DIR</span></code> to your model directory. The example exposes device 0;
 adjust device IDs and driver paths for your host. Use <code class="docutils literal notranslate"><span class="pre">--privileged</span></code> only
@@ -772,12 +788,12 @@ bash<span class="w"> </span>scripts/npu/install_npu_torchcodec.sh<span class="w"
                   
 <div class="prev-next-area">
     <a class="left-prev"
-       href="installation.html"
+       href="installation_apple_silicon.html"
        title="previous page">
       <i class="fa-solid fa-angle-left"></i>
       <div class="prev-next-info">
         <p class="prev-next-subtitle">previous</p>
-        <p class="prev-next-title">🚀 Installation</p>
+        <p class="prev-next-title">Installation — Apple Silicon</p>
       </div>
     </a>
     <a class="right-next"
@@ -785,7 +801,7 @@ bash<span class="w"> </span>scripts/npu/install_npu_torchcodec.sh<span class="w"
        title="next page">
       <div class="prev-next-info">
         <p class="prev-next-subtitle">next</p>
-        <p class="prev-next-title">🚀 Installation — Intel XPU</p>
+        <p class="prev-next-title">Installation — Intel XPU</p>
       </div>
       <i class="fa-solid fa-angle-right"></i>
     </a>
@@ -852,7 +868,7 @@ By SGLang-Omni Team
   
   <div class="footer-item">
     <p class="last-updated">
-  Last updated on Sep 29, 2026.
+  Last updated on Oct 20, 2026.
   <br/>
 </p>
   </div>
