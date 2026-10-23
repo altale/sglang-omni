@@ -134,17 +134,21 @@ jobs:
       - uses: astral-sh/setup-uv@v6
 
       - name: Set up the CI Python
+        id: ci-python
         run: |
           uv venv -q -p 3.12 --allow-existing "$VOXT_CI_ROOT/venv"
           VIRTUAL_ENV="$VOXT_CI_ROOT/venv" uv pip install -q -r sglang_omni_mlx/native/ci/requirements.lock
 
       - name: Provision checkpoints and corpus
+        id: asr-checkpoints
         run: |
           "$VOXT_CI_ROOT/venv/bin/python" sglang_omni_mlx/native/ci/provision.py "$VOXT_CI_ROOT/data"
 
       - name: Build the runtime
+        id: native-build
         run: |
           sglang_omni_mlx/native/scripts/build_runtime.sh "$RUNNER_TEMP/runtime" "$VOXT_CI_ROOT/runtime-build"
+          "$VOXT_CI_ROOT/runtime-build/venv/bin/cmake" --build "$VOXT_CI_ROOT/runtime-build/cmake" --target asr_service_probe
 
       # Every golden file is checked, even after one fails, and this chip's
       # outputs are uploaded so they can be recorded as its golden outputs.
@@ -159,8 +163,10 @@ jobs:
           exit $status
 
       - name: Server API tests
+        if: ${{ !cancelled() && steps.native-build.outcome == 'success' && steps.asr-checkpoints.outcome == 'success' }}
         env:
           NATIVE_RUNTIME_BIN: ${{ runner.temp }}/runtime/bin
+          NATIVE_SERVICE_PROBE: ${{ env.VOXT_CI_ROOT }}/runtime-build/cmake/asr_service_probe
           CI_DATA_ROOT: ${{ env.VOXT_CI_ROOT }}/data
         run: |
           "$VOXT_CI_ROOT/venv/bin/python" -m pytest -q sglang_omni_mlx/native/ci/test_check_golden.py sglang_omni_mlx/native/ci/test_server_api.py sglang_omni_mlx/native/ci/test_vad_api.py \
@@ -202,7 +208,7 @@ jobs:
           "$VOXT_CI_ROOT/venv/bin/python" -m pytest -q sglang_omni_mlx/native/ci/test_model_servers.py
 
       - name: Check disk space and provision Ming checkpoint
-        if: ${{ !cancelled() && needs.preflight.outputs.run_ming == 'true' }}
+        if: ${{ !cancelled() && needs.preflight.outputs.run_ming == 'true' && steps.ci-python.outcome == 'success' && steps.native-build.outcome == 'success' }}
         id: ming-checkpoint
         run: |
           cached_gb=0
@@ -231,7 +237,7 @@ jobs:
             --model "$MING_MODEL_REPO"
 
       - name: Ming TTS API tests (Q4)
-        if: ${{ !cancelled() && needs.preflight.outputs.run_ming == 'true' && steps.ming-checkpoint.outcome == 'success' }}
+        if: ${{ !cancelled() && needs.preflight.outputs.run_ming == 'true' && steps.native-build.outcome == 'success' && steps.asr-checkpoints.outcome == 'success' && steps.ming-checkpoint.outcome == 'success' }}
         env:
           NATIVE_RUNTIME_BIN: ${{ runner.temp }}/runtime/bin
           CI_DATA_ROOT: ${{ env.VOXT_CI_ROOT }}/data

@@ -226,6 +226,7 @@ def test_discovery(connection: http.client.HTTPConnection) -> None:
     "changes,status",
     [
         ({"input": "\u3000\n "}, 400),
+        ({"input": "\u3000\n ", "stream": True, "response_format": "pcm"}, 400),
         ({"stream": True}, 400),
         ({"max_new_tokens": 1.5}, 400),
         ({"stage_params": {"tts_engine": {"cfg": 1}}}, 400),
@@ -259,6 +260,20 @@ def test_invalid_request(
     with connection.getresponse() as response:
         assert response.status == status
         assert json.load(response)["detail"]
+    connection.close()
+
+
+def test_request_body_limit(connection: http.client.HTTPConnection) -> None:
+    """An oversized request must remain a 400 when using the shared body reader."""
+    connection.request(
+        "POST",
+        "/v1/audio/speech",
+        b" " * (4 * 1024 * 1024 + 1),
+        {"Content-Type": "application/json"},
+    )
+    with connection.getresponse() as response:
+        assert response.status == 400
+        assert json.load(response)["detail"] == "request body exceeds size limit"
     connection.close()
 
 

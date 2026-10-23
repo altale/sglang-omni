@@ -42,14 +42,13 @@ public:
 
 private:
   struct Job {
-    mg_connection *connection;
     SpeechRequest request;
-    bool headers_sent = false;
     std::string audio;
     int sample_rate = 0;
   };
   int HandleSpeech(mg_connection *connection);
-  void Generate(Job &job, const std::function<void()> &check_cancelled);
+  void Generate(Job &job, tts_service::AudioResponse &response,
+                const std::function<void()> &check_cancelled);
   std::filesystem::path directory_;
   std::unique_ptr<MingFrontend> frontend_;
   std::unique_ptr<MingGenerator> generator_;

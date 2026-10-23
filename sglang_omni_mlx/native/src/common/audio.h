@@ -24,12 +24,13 @@ inline constexpr int kChunkTokenCount = 13;
 // mel frame, and a token count computed with float32 true division).
 enum class AudioLayout { kReference, kVoxtSwift };
 
+// PCM16 bytes must be little-endian, with complete interleaved channel frames.
+std::string EncodeWavPcm16(std::string_view pcm_bytes, int sample_rate,
+                           int channels);
+
 // 16 kHz mono PCM16 or float32 WAV to float32 samples; throws
 // std::invalid_argument for anything else.
 std::vector<float> DecodeWav(std::string_view wav_bytes);
-
-std::string EncodeWavPcm16(std::string_view pcm_bytes, int sample_rate,
-                           int channels);
 
 // Slaney-scale, Slaney-normalized filters [frequency_bins, mel_bins], built in
 // float32 in the same order as Voxt's Swift front end.

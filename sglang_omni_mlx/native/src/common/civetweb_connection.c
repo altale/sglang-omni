@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 // Note (Adrian Wei): the pinned CivetWeb has no public peer-state query.
 #include "civetweb.c"
-
 #include "common/civetweb_connection.h"
 
 int omni_connection_closed(const struct mg_connection *connection) {
@@ -16,7 +15,8 @@ int omni_connection_closed(const struct mg_connection *connection) {
     char pending_byte;
     const ssize_t received = recv(connection->client.sock, &pending_byte, 1,
                                   MSG_PEEK | MSG_DONTWAIT);
-    return received == 0 || (received < 0 && errno != EAGAIN &&
-                             errno != EWOULDBLOCK && errno != EINTR);
+    return received == 0 ||
+           (received < 0 && errno != EAGAIN && errno != EWOULDBLOCK &&
+            errno != EINTR);
   }
 }

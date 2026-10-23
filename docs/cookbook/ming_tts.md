@@ -61,9 +61,7 @@ Cross-request non-streaming AudioVAE batching is not implemented yet. The only s
 
 ### Apple Silicon (MLX)
 
-The native C++ server supports text-only WAV/PCM responses and streaming PCM
-with the official BF16 checkpoint or the pre-quantized
-`mlx-community/Ming-omni-tts-16.8B-A3B-4bit` checkpoint:
+The native C++ server supports text-only WAV/PCM responses and streaming PCM with the official BF16 checkpoint or the pre-quantized `mlx-community/Ming-omni-tts-16.8B-A3B-4bit` checkpoint:
 
 ```bash
 bash sglang_omni_mlx/native/scripts/build_runtime.sh build/native/runtime build/native/work
@@ -73,24 +71,11 @@ build/native/runtime/bin/ming_tts_server \
   --model-name ming-omni-tts --host 127.0.0.1 --port 8000
 ```
 
-For native supervisor integration, launch with `--supervised --model-kind ming_tts
---model-directory "$MING_MODEL_DIR"`. The shared native server defaults to a free
-port and a generated model name; pass `--port` and `--model-name` to fix them.
-Supervised mode reports them in a JSON `ready` event on stdout. Send `{"command":"shutdown"}`
-on stdin to stop. Closing stdin also stops the process.
+For native supervisor integration, launch with `--supervised --model-kind ming_tts --model-directory "$MING_MODEL_DIR"`. The shared native server defaults to a free port and a generated model name; pass `--port` and `--model-name` to fix them. Supervised mode reports them in a JSON `ready` event on stdout. Send `{"command":"shutdown"}` on stdin to stop. Closing stdin also stops the process.
 
-Native voice cloning accepts one inline `data:audio/wav;base64,...` reference in
-`ref_audio`, together with its transcript in `ref_text`. The WAV must be mono
-16 kHz PCM16 or float32 and contain 0.1–30 seconds of audio. Request bodies are
-limited to 4 MiB. Both non-streaming WAV/PCM and streaming PCM are supported.
-CampPlus and AudioVAE reference encoding run in C++ MLX and are loaded on the
-first reference request. Later requests reuse the encoder weights.
+Native voice cloning accepts one inline `data:audio/wav;base64,...` reference in `ref_audio`, together with its transcript in `ref_text`. The WAV must be mono 16 kHz PCM16 or float32 and contain 0.1–30 seconds of audio. Request bodies are limited to 4 MiB. Both non-streaming WAV/PCM and streaming PCM are supported. CampPlus and AudioVAE reference encoding run in C++ MLX and are loaded on the first reference request. Later requests reuse the encoder weights.
 
-Voice cloning requires `campplus.safetensors` in the model directory. The Q4
-checkpoint includes it. The official BF16 checkpoint instead includes ONNX
-weights, which the native server does not read. For BF16, place a copy of the Q4
-checkpoint's `campplus.safetensors` alongside the model files. Its FP32 tensors
-are identical to the official CampPlus ONNX initializers.
+Voice cloning requires `campplus.safetensors` in the model directory. The Q4 checkpoint includes it. The official BF16 checkpoint instead includes ONNX weights, which the native server does not read. For BF16, place a copy of the Q4 checkpoint's `campplus.safetensors` alongside the model files. Its FP32 tensors are identical to the official CampPlus ONNX initializers.
 
 With the native server running, send a reference clip and its transcript:
 
@@ -116,12 +101,7 @@ print(json.dumps({
 PY
 ```
 
-For 4-bit inference, download the MLX community checkpoint and use its local
-directory as `--model-path`. Quantization is read from the checkpoint; there is
-no native online-quantization flag. The checkpoint also quantizes acoustic and
-AudioVAE linear layers. The server accepts one active request; additional
-concurrent requests return HTTP 429. Serving does not require Python or SGLang
-workers.
+For 4-bit inference, download the MLX community checkpoint and use its local directory as `--model-path`. Quantization is read from the checkpoint; there is no native online-quantization flag. The checkpoint also quantizes acoustic and AudioVAE linear layers. The server accepts one active request; additional concurrent requests return HTTP 429. Serving does not require Python or SGLang workers.
 
 ## Synthesizing Speech
 
@@ -282,12 +262,7 @@ python -m benchmarks.eval.benchmark_tts_seedtts \
 
 ### Native Apple Silicon evaluation
 
-The native entry point manages servers and reuses the shared SeedTTS evaluator.
-Run it from the repository root using
-a Python environment with the repository's benchmark dependencies, not the minimal
-native build environment. Model arguments accept HuggingFace IDs or local
-directories. IDs are resolved through the HuggingFace cache, downloading missing
-files before starting each server.
+The native entry point manages servers and reuses the shared SeedTTS evaluator. Run it from the repository root using a Python environment with the repository's benchmark dependencies, not the minimal native build environment. Model arguments accept HuggingFace IDs or local directories. IDs are resolved through the HuggingFace cache, downloading missing files before starting each server.
 
 ```bash
 MING_EVAL_DIR="$(mktemp -d /tmp/ming-native-seedtts.XXXXXX)"
@@ -302,42 +277,17 @@ python -m sglang_omni_mlx.native.ci.evaluate_tts \
   --output-dir "$MING_EVAL_DIR/nonstream/zh"
 ```
 
-This command starts Ming, generates audio, stops Ming, starts Qwen3-ASR, scores the
-saved audio, and stops ASR. Native mode defaults to text-only, concurrency 1, one
-warmup request, a 256-token generation limit, and no speech-outcome queries. It
-does not run CUDA cleanup. Stop manually launched servers first, or choose a free
-`--port`. Logs are saved under `server_logs/` in the output directory.
+This command starts Ming, generates audio, stops Ming, starts Qwen3-ASR, scores the saved audio, and stops ASR. Native mode defaults to text-only, concurrency 1, one warmup request, a 256-token generation limit, and no speech-outcome queries. It does not run CUDA cleanup. Stop manually launched servers first, or choose a free `--port`. Logs are saved under `server_logs/` in the output directory.
 
-The model IDs above are the native defaults. Use `--model-revision` and
-`--asr-model-revision` to pin Hub checkpoints; these flags do not apply to local
-directories. `HF_HUB_OFFLINE=1` requires the requested checkpoints to be cached.
-Record the ASR checkpoint and revision when reporting scores: this MLX 8-bit
-evaluator is not the same precision as CUDA CI's Qwen3-ASR-1.7B evaluator.
+The model IDs above are the native defaults. Use `--model-revision` and `--asr-model-revision` to pin Hub checkpoints; these flags do not apply to local directories. `HF_HUB_OFFLINE=1` requires the requested checkpoints to be cached. Record the ASR checkpoint and revision when reporting scores: this MLX 8-bit evaluator is not the same precision as CUDA CI's Qwen3-ASR-1.7B evaluator.
 
-For pre-quantized Ming, pass
-`--model mlx-community/Ming-omni-tts-16.8B-A3B-4bit` and
-`--model-revision 97752f43c4d7a6b3f045f484c798bf6bb1f950df`, using a separate output
-directory from BF16 evaluation.
+For pre-quantized Ming, pass `--model mlx-community/Ming-omni-tts-16.8B-A3B-4bit` and `--model-revision 97752f43c4d7a6b3f045f484c798bf6bb1f950df`, using a separate output directory from BF16 evaluation.
 
-Repeat for `--lang en`, saving to `nonstream/en`. For streaming, add `--stream` and
-save to `stream/zh` or `stream/en`. This is a 50-sample smoke evaluation; omit
-`--max-samples` for the full splits. `--generate-only` and `--transcribe-only` still
-support running either phase separately.
+Repeat for `--lang en`, saving to `nonstream/en`. For streaming, add `--stream` and save to `stream/zh` or `stream/en`. This is a 50-sample smoke evaluation; omit `--max-samples` for the full splits. `--generate-only` and `--transcribe-only` still support running either phase separately.
 
-For voice cloning, add `--voice-clone` and use a separate output directory. The
-evaluator converts each SeedTTS reference to a 16 kHz mono PCM16 data URL before
-timing generation, preserving the reference transcript and original audio files.
-The model directory must contain `campplus.safetensors`. Both streaming and
-non-streaming evaluation are supported. Keep `--voice-clone` when running
-`--transcribe-only` so the WER result records the correct input mode.
+For voice cloning, add `--voice-clone` and use a separate output directory. The evaluator converts each SeedTTS reference to a 16 kHz mono PCM16 data URL before timing generation, preserving the reference transcript and original audio files. The model directory must contain `campplus.safetensors`. Both streaming and non-streaming evaluation are supported. Keep `--voice-clone` when running `--transcribe-only` so the WER result records the correct input mode.
 
-The evaluator prepares 16 kHz mono copies for native ASR under `asr/`, preserving
-the original WAVs and `generated.json`. Scoring results are saved to
-`asr/wer_results.json` and `asr/asr_speed_results.json`.
-Report EN WER / ZH CER together with generation and ASR
-failure counts; failed samples must not be hidden by the error-rate average.
-These are measured quality results, not PCM golden comparisons or calibrated
-Apple-specific CI thresholds. Speaker similarity is not evaluated.
+The evaluator prepares 16 kHz mono copies for native ASR under `asr/`, preserving the original WAVs and `generated.json`. Scoring results are saved to `asr/wer_results.json` and `asr/asr_speed_results.json`. Report EN WER / ZH CER together with generation and ASR failure counts; failed samples must not be hidden by the error-rate average. These are measured quality results, not PCM golden comparisons or calibrated Apple-specific CI thresholds. Speaker similarity is not evaluated.
 
 ## Benchmark Results
 

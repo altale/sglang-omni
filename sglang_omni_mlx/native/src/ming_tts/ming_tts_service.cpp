@@ -213,70 +213,36 @@ int MingSpeechService::HandleSpeech(mg_connection *connection) {
   } else {
   }
   Job job;
-  job.connection = connection;
-  int status = 200;
-  std::string detail;
   try {
-    std::string body;
-    char buffer[4096];
-    int count;
-    while ((count = mg_read(connection, buffer, sizeof(buffer))) > 0) {
-      body.append(buffer, static_cast<size_t>(count));
-      if (body.size() > kMaxBodyBytes) {
-        throw std::invalid_argument("request exceeds 4 MiB");
-      } else {
-      }
-    }
+    const auto body = omni_server::ReadBody(connection, kMaxBodyBytes);
     job.request = SpeechRequest::Parse(nlohmann::json::parse(body));
+    const auto format = job.request.stream
+                            ? tts_service::AudioFormat::StreamingPcm
+                        : job.request.wav ? tts_service::AudioFormat::Wav
+                                          : tts_service::AudioFormat::Pcm;
+    tts_service::AudioResponse response(connection, format);
     auto synthesis =
         std::make_shared<tts_service::SynthesisWorker::Job<void>>();
     synthesis->synthesize = [&](const std::function<void()> &check_cancelled) {
-      Generate(job, check_cancelled);
+      Generate(job, response, check_cancelled);
     };
-    const auto admission = worker_.Submit(synthesis);
-    if (admission != tts_service::SynthesisWorker::Admission::Accepted) {
-      const int rejected_status =
-          admission == tts_service::SynthesisWorker::Admission::Stopping ? 503
-                                                                         : 429;
-      omni_server::WriteResponse(
-          connection, rejected_status,
-          rejected_status == 503 ? "Service Unavailable" : "Too Many Requests",
-          "application/json", "{\"detail\":\"server unavailable or busy\"}");
-      return rejected_status;
-    } else {
-      tts_service::SynthesisWorker::Wait(connection, synthesis);
-    }
+    return response.SubmitAndRespond(worker_, synthesis, [&] {
+      if (!job.request.stream) {
+        response.WritePcm(job.audio, job.sample_rate, 1);
+      } else {
+      }
+    });
   } catch (const nlohmann::json::exception &error) {
-    status = 400;
-    detail = error.what();
+    return omni_server::BadRequest(connection, error.what());
+  } catch (const std::length_error &error) {
+    return omni_server::BadRequest(connection, error.what());
   } catch (const std::invalid_argument &error) {
     std::cerr << "Speech request failed: " << typeid(error).name() << '\n';
-    status = 400;
-    detail = error.what();
+    return omni_server::BadRequest(connection, error.what());
   } catch (const std::exception &error) {
     std::cerr << "Speech generation failed: " << typeid(error).name() << '\n';
-    status = 500;
-    detail = error.what();
+    return omni_server::WriteJson(connection, 500, {{"detail", error.what()}});
   }
-  if (status != 200) {
-    if (!job.headers_sent) {
-      omni_server::WriteJson(connection, status, {{"detail", detail}});
-    } else {
-    }
-  } else if (job.request.stream) {
-    mg_send_chunk(connection, "", 0);
-  } else {
-    mg_printf(connection,
-              "HTTP/1.1 200 OK\r\nContent-Type: %s\r\nContent-Length: %zu\r\n"
-              "Connection: close\r\nX-Sample-Rate: %d\r\nX-Channels: 1\r\n"
-              "X-Bit-Depth: 16\r\n\r\n",
-              job.request.wav ? "audio/wav" : "audio/pcm", job.audio.size(),
-              job.sample_rate);
-    mg_write(connection, job.audio.data(), job.audio.size());
-  }
-  // Note (altale): Return the sent HTTP status, but leave failed streams
-  // unterminated.
-  return job.headers_sent ? 200 : status;
 }
 
 std::map<std::string, int> MingSpeechService::RequestStates() const {
@@ -285,7 +251,7 @@ std::map<std::string, int> MingSpeechService::RequestStates() const {
 
 void MingSpeechService::CancelAll() { worker_.Stop(); }
 
-void MingSpeechService::Generate(Job &job,
+void MingSpeechService::Generate(Job &job, tts_service::AudioResponse &response,
                                  const std::function<void()> &check_cancelled) {
   const auto &request = job.request;
   const auto &acoustic = generator_->acoustic();
@@ -333,39 +299,14 @@ void MingSpeechService::Generate(Job &job,
                                 audio_state, state.finished);
       pending.clear();
       chunk_patches = kSteadyChunkPatches;
-      const auto pcm = Pcm(waveform);
-      if (pcm.empty()) {
-        continue;
-      } else if (!job.headers_sent) {
-        job.headers_sent = true;
-        if (mg_printf(
-                job.connection,
-                "HTTP/1.1 200 OK\r\nContent-Type: audio/pcm\r\n"
-                "Transfer-Encoding: chunked\r\nConnection: close\r\n"
-                "X-Sample-Rate: %d\r\nX-Channels: 1\r\nX-Bit-Depth: 16\r\n\r\n",
-                decoder_->sample_rate()) <= 0) {
-          throw std::runtime_error("failed to write speech headers");
-        } else {
-        }
-      } else {
-      }
-      if (mg_send_chunk(job.connection, pcm.data(),
-                        static_cast<unsigned int>(pcm.size())) < 0) {
-        throw std::runtime_error("failed to write speech chunk");
-      } else {
-      }
+      response.WritePcm(Pcm(waveform), decoder_->sample_rate(), 1);
     } else {
     }
   }
   check_cancelled();
   if (!request.stream) {
-    auto audio = Pcm(
+    job.audio = Pcm(
         decoder_->DecodeFull(mx::expand_dims(mx::concatenate(pending, 0), 0)));
-    if (request.wav) {
-      audio = qwen3_asr::EncodeWavPcm16(audio, decoder_->sample_rate(), 1);
-    } else {
-    }
-    job.audio = std::move(audio);
     job.sample_rate = decoder_->sample_rate();
   } else {
   }
