@@ -263,17 +263,40 @@ def test_invalid_request(
     connection.close()
 
 
-def test_request_body_limit(connection: http.client.HTTPConnection) -> None:
-    """An oversized request must remain a 400 when using the shared body reader."""
-    connection.request(
-        "POST",
-        "/v1/audio/speech",
-        b" " * (4 * 1024 * 1024 + 1),
-        {"Content-Type": "application/json"},
-    )
+@pytest.mark.parametrize(
+    "declared_length,body_bytes,status",
+    [
+        (True, 4 * 1024 * 1024 + 1, 413),
+        (False, 4 * 1024 * 1024, 400),
+        (False, 4 * 1024 * 1024 + 1, 413),
+    ],
+)
+def test_request_body_limit(
+    connection: http.client.HTTPConnection,
+    declared_length: bool,
+    body_bytes: int,
+    status: int,
+) -> None:
+    """Reject oversized bodies early while allowing the exact limit to be parsed."""
+    if declared_length:
+        connection.putrequest("POST", "/v1/audio/speech")
+        connection.putheader("Content-Length", str(body_bytes))
+        connection.endheaders()
+    else:
+        body = json.dumps({"model": "ming-omni-tts", "input": ""}).encode()
+        connection.request(
+            "POST",
+            "/v1/audio/speech",
+            [body.ljust(body_bytes, b" ")],
+            {"Content-Type": "application/json"},
+        )
     with connection.getresponse() as response:
-        assert response.status == 400
-        assert json.load(response)["detail"] == "request body exceeds size limit"
+        assert response.status == status
+        detail = json.load(response)["detail"]
+        if status == 413:
+            assert detail == "request body must be at most 4194304 bytes"
+        else:
+            assert "input" in detail
     connection.close()
 
 

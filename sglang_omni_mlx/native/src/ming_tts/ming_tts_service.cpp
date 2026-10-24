@@ -215,7 +215,11 @@ int MingSpeechService::HandleSpeech(mg_connection *connection) {
   Job job;
   try {
     const auto body = omni_server::ReadBody(connection, kMaxBodyBytes);
-    job.request = SpeechRequest::Parse(nlohmann::json::parse(body));
+    if (!body.has_value()) {
+      return 413;
+    } else {
+    }
+    job.request = SpeechRequest::Parse(nlohmann::json::parse(*body));
     const auto format = job.request.stream
                             ? tts_service::AudioFormat::StreamingPcm
                         : job.request.wav ? tts_service::AudioFormat::Wav
@@ -233,8 +237,6 @@ int MingSpeechService::HandleSpeech(mg_connection *connection) {
       }
     });
   } catch (const nlohmann::json::exception &error) {
-    return omni_server::BadRequest(connection, error.what());
-  } catch (const std::length_error &error) {
     return omni_server::BadRequest(connection, error.what());
   } catch (const std::invalid_argument &error) {
     std::cerr << "Speech request failed: " << typeid(error).name() << '\n';
