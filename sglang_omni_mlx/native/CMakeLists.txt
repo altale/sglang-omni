@@ -256,3 +256,18 @@ set_target_properties(voxtral_tts_server voxtral_tts_synthesize PROPERTIES
   BUILD_RPATH "${MLX_LIBRARY_DIRS};@loader_path"
   INSTALL_RPATH "@loader_path")
 install(TARGETS voxtral_tts_server voxtral_tts_synthesize RUNTIME DESTINATION bin)
+
+add_library(music3 STATIC src/music3/music3_model.cpp src/music3/music3_ar.cpp
+  src/music3/music3_acoustic.cpp src/music3/music3_audio.cpp src/music3/music3_request.cpp)
+target_link_libraries(music3 PUBLIC qwen3_asr)
+target_compile_options(music3 PRIVATE -Wall -Wextra -ffp-contract=off)
+add_executable(music3_server src/music3/music3_server.cpp src/music3/music3_service.cpp)
+target_link_libraries(music3_server PRIVATE music3 omni_service)
+add_executable(music3_synthesize tools/music3_synthesize.cpp)
+target_link_libraries(music3_synthesize PRIVATE music3)
+set_target_properties(music3_server music3_synthesize PROPERTIES
+  BUILD_RPATH "${MLX_LIBRARY_DIRS};@loader_path"
+  INSTALL_RPATH "@loader_path")
+install(TARGETS music3_server music3_synthesize RUNTIME DESTINATION bin)
+
+install(FILES licenses/music3-MIT.txt DESTINATION licenses)

@@ -14,7 +14,7 @@ namespace qwen3_asr {
 
 class Tokenizer {
 public:
-  // Reads vocab.json, merges.txt and tokenizer_config.json from the checkpoint.
+  // Reads byte-level BPE from vocab.json/merges.txt or tokenizer.json.
   explicit Tokenizer(const std::filesystem::path &model_directory);
   static Tokenizer FromJson(const nlohmann::json &tokenizer);
   ~Tokenizer();
@@ -31,6 +31,7 @@ public:
 private:
   struct Serialized {};
   Tokenizer(const nlohmann::json &tokenizer, Serialized);
+  void LoadJson(const nlohmann::json &tokenizer);
 
   struct AddedToken {
     std::string content;
