@@ -11,7 +11,7 @@
 namespace ming_tts {
 namespace mx = mlx::core;
 
-AudioTransformer::AudioTransformer(const qwen3_asr::Checkpoint &checkpoint,
+AudioTransformer::AudioTransformer(const omni_common::Checkpoint &checkpoint,
                                    std::string prefix,
                                    const nlohmann::json &config)
     : checkpoint_(checkpoint), prefix_(std::move(prefix)),
@@ -159,7 +159,7 @@ mx::array AudioTransformer::Forward(mx::array hidden,
     hidden = mx::add(
         hidden, checkpoint_.Linear(
                     mx::multiply(
-                        qwen3_asr::Silu(checkpoint_.Linear(
+                        omni_common::Silu(checkpoint_.Linear(
                             mlp_input, prefix + ".mlp.gate_proj")),
                         checkpoint_.Linear(mlp_input, prefix + ".mlp.up_proj")),
                     prefix + ".mlp.down_proj"));

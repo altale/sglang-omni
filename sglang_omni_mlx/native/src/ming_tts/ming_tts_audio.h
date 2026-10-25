@@ -15,15 +15,15 @@ struct AudioCache {
 
 class AudioTransformer {
 public:
-  AudioTransformer(const qwen3_asr::Checkpoint &checkpoint, std::string prefix,
-                   const nlohmann::json &config);
+  AudioTransformer(const omni_common::Checkpoint &checkpoint,
+                   std::string prefix, const nlohmann::json &config);
   mlx::core::array Forward(mlx::core::array hidden,
                            std::vector<AudioCache> &caches) const;
   std::vector<AudioCache> NewCaches() const;
   int hidden_size() const { return hidden_size_; }
 
 private:
-  const qwen3_asr::Checkpoint &checkpoint_;
+  const omni_common::Checkpoint &checkpoint_;
   std::string prefix_;
   int hidden_size_, layers_, heads_, kv_heads_;
   float epsilon_, rope_theta_;
@@ -52,7 +52,7 @@ private:
                               AudioDecoderState &state, bool streaming,
                               bool last_chunk) const;
   int patch_size_, hop_length_, latent_dim_, sample_rate_;
-  qwen3_asr::Checkpoint checkpoint_;
+  omni_common::Checkpoint checkpoint_;
   AudioTransformer transformer_;
 };
 
@@ -65,7 +65,7 @@ private:
   MingAudioEncoder(const nlohmann::json &config,
                    const std::filesystem::path &directory);
   int patch_size_, hop_length_, input_dim_, latent_dim_;
-  qwen3_asr::Checkpoint checkpoint_;
+  omni_common::Checkpoint checkpoint_;
   AudioTransformer transformer_;
   std::optional<AudioTransformer> aggregator_;
 };

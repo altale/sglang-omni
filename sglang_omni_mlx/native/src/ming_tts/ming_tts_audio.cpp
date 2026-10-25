@@ -12,7 +12,7 @@ namespace ming_tts {
 namespace mx = mlx::core;
 
 MingAudioDecoder::MingAudioDecoder(const std::filesystem::path &directory)
-    : MingAudioDecoder(qwen3_asr::ReadJson(directory / "config.json"),
+    : MingAudioDecoder(omni_common::ReadJson(directory / "config.json"),
                        directory) {}
 
 MingAudioDecoder::MingAudioDecoder(const nlohmann::json &config,
@@ -235,7 +235,7 @@ mx::array MingAudioDecoder::DecodeChunk(const mx::array &latents,
 }
 
 MingAudioEncoder::MingAudioEncoder(const std::filesystem::path &directory)
-    : MingAudioEncoder(qwen3_asr::ReadJson(directory / "config.json"),
+    : MingAudioEncoder(omni_common::ReadJson(directory / "config.json"),
                        directory) {}
 
 MingAudioEncoder::MingAudioEncoder(const nlohmann::json &config,

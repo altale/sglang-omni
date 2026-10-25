@@ -10,12 +10,12 @@
 
 namespace ming_tts {
 
-qwen3_asr::WeightMap
+omni_common::WeightMap
 LoadComponentWeights(const std::filesystem::path &directory,
                      const std::vector<std::string> &prefixes);
-void RequireShape(const qwen3_asr::Checkpoint &checkpoint,
+void RequireShape(const omni_common::Checkpoint &checkpoint,
                   const std::string &name, const mlx::core::Shape &shape);
-mlx::core::Dtype WeightDtype(const qwen3_asr::Checkpoint &checkpoint,
+mlx::core::Dtype WeightDtype(const omni_common::Checkpoint &checkpoint,
                              const std::string &prefix);
 
 struct BackboneConfig {
@@ -65,7 +65,7 @@ private:
                        const std::string &prefix) const;
 
   BackboneConfig config_;
-  qwen3_asr::Checkpoint checkpoint_;
+  omni_common::Checkpoint checkpoint_;
   mlx::core::array inverse_frequencies_;
 };
 

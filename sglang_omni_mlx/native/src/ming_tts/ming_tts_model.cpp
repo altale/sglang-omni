@@ -12,11 +12,11 @@ namespace ming_tts {
 
 namespace mx = mlx::core;
 
-qwen3_asr::WeightMap
+omni_common::WeightMap
 LoadComponentWeights(const std::filesystem::path &directory,
                      const std::vector<std::string> &prefixes) {
-  auto source = qwen3_asr::LoadSafetensors(directory);
-  qwen3_asr::WeightMap weights;
+  auto source = omni_common::LoadSafetensors(directory);
+  omni_common::WeightMap weights;
   for (auto &[name, tensor] : source) {
     // Note (altale): Audio transformers consume hidden states, not token IDs.
     if (name.starts_with("audio.decoder.decoder.embed_tokens.") ||
@@ -37,7 +37,7 @@ LoadComponentWeights(const std::filesystem::path &directory,
   return weights;
 }
 
-void RequireShape(const qwen3_asr::Checkpoint &checkpoint,
+void RequireShape(const omni_common::Checkpoint &checkpoint,
                   const std::string &name, const mx::Shape &shape) {
   const auto &tensor = checkpoint.Weight(name);
   const std::string prefix =
@@ -70,7 +70,7 @@ void RequireShape(const qwen3_asr::Checkpoint &checkpoint,
   }
 }
 
-mx::Dtype WeightDtype(const qwen3_asr::Checkpoint &checkpoint,
+mx::Dtype WeightDtype(const omni_common::Checkpoint &checkpoint,
                       const std::string &prefix) {
   if (checkpoint.Has(prefix + ".scales")) {
     return checkpoint.Weight(prefix + ".scales").dtype();
@@ -84,11 +84,11 @@ namespace {
 // Note (altale): Sort larger token batches by expert before grouped matmul.
 constexpr int kExpertSortThreshold = 64;
 
-qwen3_asr::WeightMap
+omni_common::WeightMap
 BackboneWeights(const std::filesystem::path &model_directory,
                 const BackboneConfig &config) {
-  auto source = qwen3_asr::LoadSafetensors(model_directory);
-  qwen3_asr::WeightMap weights;
+  auto source = omni_common::LoadSafetensors(model_directory);
+  omni_common::WeightMap weights;
   for (auto &[name, tensor] : source) {
     if (!name.starts_with("model.model.") ||
         name.ends_with(".rotary_emb.inv_freq")) {
@@ -231,7 +231,7 @@ BackboneConfig BackboneConfig::FromJson(const nlohmann::json &config) {
 }
 
 MingBackbone::MingBackbone(const std::filesystem::path &model_directory)
-    : MingBackbone(qwen3_asr::ReadJson(model_directory / "config.json"),
+    : MingBackbone(omni_common::ReadJson(model_directory / "config.json"),
                    model_directory) {}
 
 MingBackbone::MingBackbone(const nlohmann::json &config,
@@ -332,7 +332,7 @@ mx::array MingBackbone::Mlp(const mx::array &x,
                             const std::string &prefix) const {
   return checkpoint_.Linear(
       mx::multiply(
-          qwen3_asr::Silu(checkpoint_.Linear(x, prefix + ".gate_proj")),
+          omni_common::Silu(checkpoint_.Linear(x, prefix + ".gate_proj")),
           checkpoint_.Linear(x, prefix + ".up_proj")),
       prefix + ".down_proj");
 }
@@ -390,7 +390,7 @@ mx::array MingBackbone::Moe(const mx::array &x,
     }
   };
   mx::array routed =
-      project(mx::multiply(qwen3_asr::Silu(project(expanded, "gate_proj")),
+      project(mx::multiply(omni_common::Silu(project(expanded, "gate_proj")),
                            project(expanded, "up_proj")),
               "down_proj");
   if (sorted_indices) {

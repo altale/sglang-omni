@@ -44,8 +44,8 @@ bool HasText(const std::string &text) {
 } // namespace
 
 MingFrontend::MingFrontend(const std::filesystem::path &directory)
-    : tokenizer_(qwen3_asr::Tokenizer::FromJson(
-          qwen3_asr::ReadJson(directory / "tokenizer.json"))) {
+    : tokenizer_(omni_common::Tokenizer::FromJson(
+          omni_common::ReadJson(directory / "tokenizer.json"))) {
   for (const auto *token : {"<role>", "</role>", "<audio>", "<|endoftext|>",
                             "<spk>", "</spk>", "<audioPatch>"}) {
     const int id = tokenizer_.AddedTokenId(token);

@@ -63,7 +63,8 @@ AcousticConfig AcousticConfig::FromJson(const nlohmann::json &config) {
 }
 
 MingAcoustic::MingAcoustic(const std::filesystem::path &directory)
-    : MingAcoustic(qwen3_asr::ReadJson(directory / "config.json"), directory) {}
+    : MingAcoustic(omni_common::ReadJson(directory / "config.json"),
+                   directory) {}
 
 MingAcoustic::MingAcoustic(const nlohmann::json &config,
                            const std::filesystem::path &directory)
@@ -202,7 +203,7 @@ mx::array MingAcoustic::Dit(const mx::array &latents, const mx::array &timestep,
       frequencies);
   const std::string time_prefix = prefix + ".t_embedder.time_mlp";
   const mx::array time = checkpoint_.Linear(
-      qwen3_asr::Silu(checkpoint_.Linear(
+      omni_common::Silu(checkpoint_.Linear(
           mx::astype(mx::concatenate({mx::sin(phase), mx::cos(phase)}, -1),
                      WeightDtype(checkpoint_, time_prefix + ".0")),
           time_prefix + ".0")),

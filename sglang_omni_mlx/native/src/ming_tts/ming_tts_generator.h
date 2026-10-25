@@ -23,7 +23,7 @@ public:
                      int reference_tokens) const;
 
 private:
-  qwen3_asr::Tokenizer tokenizer_;
+  omni_common::Tokenizer tokenizer_;
 };
 
 struct GenerationState {

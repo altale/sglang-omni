@@ -104,9 +104,9 @@ SpeechRequest SpeechRequest::Parse(const nlohmann::json &request) {
     } else {
       decoded.resize(bytes - 1);
     }
-    reference_samples = qwen3_asr::DecodeWav(decoded);
-    if (reference_samples.size() < qwen3_asr::kSampleRate / 10 ||
-        reference_samples.size() > 30 * qwen3_asr::kSampleRate) {
+    reference_samples = omni_common::DecodeWav(decoded);
+    if (reference_samples.size() < omni_common::kSampleRate / 10 ||
+        reference_samples.size() > 30 * omni_common::kSampleRate) {
       throw std::invalid_argument(
           "ref_audio must contain 0.1 to 30 seconds of mono 16 kHz audio");
     } else if (!std::all_of(

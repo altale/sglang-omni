@@ -47,7 +47,7 @@ private:
                        const mlx::core::array &history) const;
   AcousticConfig dit_, aggregator_;
   int patch_size_, history_frames_, latent_dim_, llm_hidden_size_;
-  qwen3_asr::Checkpoint checkpoint_;
+  omni_common::Checkpoint checkpoint_;
 };
 
 } // namespace ming_tts

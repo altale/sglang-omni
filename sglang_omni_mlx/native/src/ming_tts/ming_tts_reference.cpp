@@ -205,7 +205,7 @@ mx::array CampPlus::Encode(const std::vector<float> &samples) const {
 MingReferenceEncoder::MingReferenceEncoder(
     const std::filesystem::path &directory)
     : speaker_(directory / "campplus.safetensors"), audio_(directory) {
-  const auto config = qwen3_asr::ReadJson(directory / "config.json");
+  const auto config = omni_common::ReadJson(directory / "config.json");
   const auto &audio = config.at("audio_tokenizer_config");
   // Note (altale): Pad to complete acoustic patches after both encoder
   // reductions.

@@ -21,7 +21,7 @@ private:
   mlx::core::array Conv1d(const mlx::core::array &hidden,
                           const std::string &weight, const std::string &bias,
                           int stride = 1, int dilation = 1) const;
-  qwen3_asr::Checkpoint speaker_;
+  omni_common::Checkpoint speaker_;
 };
 
 class MingReferenceEncoder {
