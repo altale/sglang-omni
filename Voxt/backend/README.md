@@ -30,6 +30,8 @@ see the [Music3 cookbook](../../docs/cookbook/minimax_music3.md#apple-silicon-na
 for checkpoint provisioning, request fields, reference parity and waveform
 goldens. Voxt's ASR model selection is unchanged.
 
+The standalone `ming3_audio_server` and `ming3_audio_chat` run Ming-3.0-audio-tiny for audio questions with text responses. The server exposes `/v1/chat/completions`; see the [Ming3 Audio cookbook](../../docs/cookbook/ming3_audio.md#apple-silicon-native-mlx) for checkpoint provisioning and the supported request subset. This model is not integrated into Voxt's ASR selection.
+
 ## Build and run
 
 Requirements: an Apple Silicon Mac, Xcode and [uv](https://docs.astral.sh/uv/).
