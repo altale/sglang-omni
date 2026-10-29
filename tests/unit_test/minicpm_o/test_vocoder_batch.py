@@ -11,12 +11,14 @@ import torch
 
 from sglang_omni.models.minicpm_o.components.code2wav import OUTPUT_SAMPLE_RATE
 from sglang_omni.models.minicpm_o.components.token2wav.vocoder import (
+    SILENCE_TOKEN_ID,
     StreamCaches,
     StreamChunk,
 )
 from sglang_omni.models.minicpm_o.components.tts_runtime import (
     CHUNK_GRAPH_MAX_STREAMS,
     CODEC_CHUNK_SIZE,
+    SILENCE_PREFIX_LENGTH,
     MiniCPMOVocoderRuntime,
     SynthesisRequest,
 )
@@ -304,6 +306,7 @@ def speech_append(
                 is_listen=is_listen,
                 end_of_turn=end_of_turn,
                 speech_turn_start=True,
+                is_speech_cut=False,
             )
         ),
         context=SessionContext(
@@ -364,8 +367,11 @@ def test_speech_hooks_emit_one_voice_chunk_per_unit() -> None:
     assert payloads == [append.payload for append in appends]
     assert [chunk.payload["pcm"] for chunk in listening_chunks] == [b""]
     (voice,) = speaking_chunks
-    assert voice.duration_ms == 1000
-    assert len(voice.payload["pcm"]) == 2 * OUTPUT_SAMPLE_RATE
+    decoded = [SILENCE_TOKEN_ID] * SILENCE_PREFIX_LENGTH + SPEAKING_TOKENS
+    decoded_pcm = np.array(decoded + [OPENED_HISTORY_FRAMES, 0], dtype="<i2")
+    assert voice.payload["pcm"] == decoded_pcm.tobytes()
+    assert voice.duration_ms == decoded_pcm.size * 1000 / OUTPUT_SAMPLE_RATE
+    assert voice.payload["is_speech_cut"] is False
     assert runtime.token2wav.forward_sizes == [1]
 
 
@@ -394,6 +400,7 @@ def run_speech_stage(
                 is_listen=False,
                 end_of_turn=end_of_turn,
                 speech_turn_start=seq == 0,
+                is_speech_cut=False,
             )
             appends.append(append)
     chunks: dict[str, list[dict]] = {append.request_id: [] for append in appends}
